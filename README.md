@@ -2,7 +2,7 @@
 
 A lightweight native macOS wrapper for YouTube Music with system integration.
 
-![macOS](https://img.shields.io/badge/macOS-26.0+-blue)
+![macOS](https://img.shields.io/badge/macOS-14.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.0-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -57,8 +57,8 @@ xattr -cr /Applications/YouTube\ Music.app
 
 ## Requirements
 
-- macOS 26.0 or later
-- Xcode 26+ (for building)
+- macOS 14.0 (Sonoma) or later
+- Xcode 16+ (for building)
 
 ## License
 
