@@ -17,10 +17,11 @@ final class YTMusicAuth {
 	func snapshot() async throws -> YTMusicSession {
 		// 1. Read all cookies from the webview's data store
 		let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
-		// ponytail: domain suffix match covers both .youtube.com and music.youtube.com
-		let ytCookies = cookies.filter { $0.domain.hasSuffix("youtube.com") }
+		// ponytail: exact + subdomain match prevents evilyoutube.com false positives
+		let ytCookies = cookies.filter { $0.domain == "youtube.com" || $0.domain.hasSuffix(".youtube.com") }
 
-		guard let sapisid = ytCookies.first(where: { $0.name == "__Secure-3PAPISID" })?.value else {
+		guard let sapisid = ytCookies.first(where: { $0.name == "__Secure-3PAPISID" })?.value,
+			  !sapisid.isEmpty else {
 			throw YTMusicAuthError.notSignedIn
 		}
 
@@ -45,8 +46,12 @@ final class YTMusicAuth {
 		});}catch(e){return null;}})()
 		"""
 
+		let raw: String?
+		do { raw = try await webView.evaluateJavaScript(js) as? String }
+		catch { throw YTMusicAuthError.configUnavailable }
+
 		guard
-			let raw = try await webView.evaluateJavaScript(js) as? String,
+			let raw,
 			let data = raw.data(using: .utf8),
 			let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
 			let apiKey = json["apiKey"] as? String, !apiKey.isEmpty,
