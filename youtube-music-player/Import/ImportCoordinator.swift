@@ -98,11 +98,15 @@ final class ImportCoordinator: ObservableObject {
 
     /// Fetches Spotify playlists. Call directly when `spotifyAuth.isConnected`.
     func loadSources() async {
+        let gen = runGeneration   // ponytail: guard against reset/new-run superseding this fetch
         errorMessage = nil
         do {
-            playlists = try await spotifyClient.playlists()
+            let fetched = try await spotifyClient.playlists()
+            guard gen == runGeneration else { return }
+            playlists = fetched
             phase = .pickSources
         } catch {
+            guard gen == runGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }

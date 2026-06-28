@@ -48,8 +48,12 @@ struct ContentView: View {
             }
         }
         .onChange(of: importLauncher.isPresented) { _, presented in
-            guard presented, let coordinator = importCoordinator else { return }
-            coordinator.resetForPresentation()
+            guard let coordinator = importCoordinator else { return }
+            if presented {
+                coordinator.resetForPresentation()
+            } else {
+                coordinator.cancel()  // stop any in-flight matching/import when sheet closes
+            }
         }
         .onChange(of: importLauncher.isDiagnosticPresented) { _, presented in
             guard presented, let coordinator = importCoordinator else { return }

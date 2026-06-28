@@ -108,3 +108,56 @@ Matcher self-check PASS
 - context7 was NOT used — all changes were based on reading the existing codebase and stdlib knowledge.
 - All A–G items fully implemented and reachable.
 - The diagnostic (B) is gated under `#if DEBUG` in the menu, consistent with the spec's suggestion.
+
+## Codex P1 + P2 — ImportCoordinator fixes (commit b49502a)
+
+### P1 — Generation-invalidate stale in-flight tasks on reset
+
+File: `youtube-music-player/Import/ImportCoordinator.swift`
+
+- Added `private var runGeneration = 0` (line ~57).
+- `resetForPresentation()`: bumps `runGeneration += 1` **before** clearing state (line ~68).
+- `startMatching()` (line ~103): `runGeneration += 1; let gen = runGeneration` at entry. Guards added:
+  - After `ytMusicAuth.snapshot()` await in do block and each catch branch (~line 128, 133, 138).
+  - Per-iteration `guard !cancelled, gen == runGeneration else { break }` in playlist loop (~line 146).
+  - `if gen == runGeneration` guards around per-playlist and likedSongs `@Published` mutations (~lines 149–163).
+  - `guard gen == runGeneration else { return }` before `importSources = sources` (~line 167).
+  - `guard gen == runGeneration else { return }` at top of `for await result in group` drain (~line 188).
+  - Seeding loop and continuation check also guard on `gen == runGeneration` (~lines 183, 200).
+  - `guard gen == runGeneration else { return }` before final `phase = .review` (~line 208).
+- `confirmAndImport()` (line ~217): same pattern — gen set at entry, guards after session await, outer source loop, batch while loop top, after `withRetry` calls in catch branches, and before `phase = .done`.
+
+### P2 — Reset reloads playlists; clears includeLiked
+
+- `resetForPresentation()` now resets `includeLiked = false` (~line 78).
+- When `spotifyAuth.isConnected`, sets `phase = .pickSources` and launches `Task { await loadSources() }` to repopulate `playlists` (~lines 80–84). `loadSources()` sets `playlists` and reasserts `phase = .pickSources` on success.
+
+### Build result
+
+`** BUILD SUCCEEDED **` (clean build, `CODE_SIGNING_ALLOWED=NO`, macOS destination)
+
+---
+
+## Codex P1 + P2 (second pass) — loadSources gen-guard + cancel on dismiss
+
+### P1 — loadSources() not generation-guarded (stale write race)
+
+File: `youtube-music-player/Import/ImportCoordinator.swift`, `loadSources()` (~line 100)
+
+- Captured `let gen = runGeneration` at function entry (before any `await`).
+- After `spotifyClient.playlists()` await: added `guard gen == runGeneration else { return }` before writing `playlists` and `phase = .pickSources`.
+- In the catch branch: added same guard before writing `errorMessage`.
+- Covers both callers (`resetForPresentation` Task and `connectSpotify`) — gen capture at entry handles both.
+
+### P2 — Sheet close doesn't stop active import Task
+
+File: `youtube-music-player/ContentView.swift`, `.onChange(of: importLauncher.isPresented)` (~line 50)
+
+- Removed `guard presented, …` early-exit so both `true` and `false` transitions are handled.
+- When `presented == true`: calls `coordinator.resetForPresentation()` (unchanged behavior).
+- When `presented == false` (sheet dismissed): calls `coordinator.cancel()` — sets `cancelled = true`, which all active loops check between I/O units.
+- Diagnostic alert path unaffected (separate `.onChange(of: importLauncher.isDiagnosticPresented)`).
+
+### Build result
+
+`** BUILD SUCCEEDED **` (clean build, `CODE_SIGNING_ALLOWED=NO`, macOS destination)
