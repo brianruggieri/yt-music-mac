@@ -258,6 +258,7 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 "music.youtube.com",
                 "youtube.com",
                 "googlevideo.com",
+                "google.com",           // bare google.com + www/myaccount for OAuth redirect chain
                 "accounts.google.com",
                 "googleapis.com",
                 "gstatic.com",
