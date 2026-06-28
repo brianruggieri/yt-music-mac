@@ -54,13 +54,26 @@ class MediaKeyHandler {
         Task.detached {
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
-                if let image = NSImage(data: data) {
+                guard let image = NSImage(data: data) else {
+                    // Decode failed: forget the URL so a later update for the same
+                    // track retries instead of being suppressed forever.
                     await MainActor.run { [weak self] in
-                        self?.artworkCache.setObject(image, forKey: url as NSURL)
-                        self?.applyArtwork(image)
+                        if self?.lastArtworkUrl == url { self?.lastArtworkUrl = nil }
                     }
+                    return
                 }
-            } catch {}
+                await MainActor.run { [weak self] in
+                    self?.artworkCache.setObject(image, forKey: url as NSURL)
+                    // A newer track may have superseded this fetch while it was in
+                    // flight; only apply if this URL is still the current one.
+                    guard self?.lastArtworkUrl == url else { return }
+                    self?.applyArtwork(image)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    if self?.lastArtworkUrl == url { self?.lastArtworkUrl = nil }
+                }
+            }
         }
     }
 
