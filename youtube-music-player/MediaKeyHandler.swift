@@ -7,6 +7,8 @@ import AppKit
 class MediaKeyHandler {
     private var viewModel: YouTubeMusicViewModel?
     private var currentArtwork: NSImage?
+    private let artworkCache = NSCache<NSURL, NSImage>()
+    private var lastArtworkUrl: URL?
 
     init() {
         setupRemoteCommandCenter()
@@ -35,25 +37,41 @@ class MediaKeyHandler {
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        // Without an explicit playback state macOS may not treat this app as the
+        // active Now Playing source, so hardware media keys can land elsewhere.
+        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
 
-        if let url = artworkUrl {
-            Task.detached {
-                do {
-                    let (data, _) = try await URLSession.shared.data(from: url)
-                    if let image = NSImage(data: data) {
-                        await MainActor.run { [weak self] in
-                            self?.currentArtwork = image
-                            let artwork = MPMediaItemArtwork(boundsSize: image.size) { [weak self] _ in
-                                return self?.currentArtwork ?? NSImage()
-                            }
-                            var updatedInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-                            updatedInfo[MPMediaItemPropertyArtwork] = artwork
-                            MPNowPlayingInfoCenter.default().nowPlayingInfo = updatedInfo
-                        }
-                    }
-                } catch {}
-            }
+        // Only fetch artwork when the URL actually changes. Play/pause re-fires this
+        // with the same URL, which previously re-downloaded + re-decoded every time.
+        guard let url = artworkUrl, url != lastArtworkUrl else { return }
+        lastArtworkUrl = url
+
+        if let cached = artworkCache.object(forKey: url as NSURL) {
+            applyArtwork(cached)
+            return
         }
+
+        Task.detached {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let image = NSImage(data: data) {
+                    await MainActor.run { [weak self] in
+                        self?.artworkCache.setObject(image, forKey: url as NSURL)
+                        self?.applyArtwork(image)
+                    }
+                }
+            } catch {}
+        }
+    }
+
+    private func applyArtwork(_ image: NSImage) {
+        currentArtwork = image
+        let artwork = MPMediaItemArtwork(boundsSize: image.size) { [weak self] _ in
+            return self?.currentArtwork ?? NSImage()
+        }
+        var updatedInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        updatedInfo[MPMediaItemPropertyArtwork] = artwork
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = updatedInfo
     }
 
     private func setupRemoteCommandCenter() {
