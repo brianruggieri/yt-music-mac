@@ -123,11 +123,13 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                     }
                 }
 
-                // Poll for track changes. The 500ms interval already catches
-                // title/artist/play-state changes. A document.body MutationObserver
-                // (subtree: true) previously fired sendTrackInfo on nearly every
-                // frame because the player bar animates constantly — pinning idle
-                // CPU for no coverage the poller doesn't already provide.
+                // Poll for track changes. The 500ms interval (2x/sec) already catches
+                // title/artist/play-state changes. A document.body subtree
+                // MutationObserver previously also ran sendTrackInfo on every DOM
+                // mutation. Measured on WebKit: ~0/sec while idle or paused, but
+                // ~5-8/sec during playback (the progress bar and time readout mutate
+                // constantly) — 2-4x the poll, all redundant since the poll already
+                // covers the same fields within 500ms.
                 setInterval(sendTrackInfo, 500);
             })();
         """#
