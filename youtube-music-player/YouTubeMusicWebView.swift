@@ -86,13 +86,21 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                     if (!md || !md.artwork || !md.artwork.length) return '';
                     let best = md.artwork[0], bestArea = -1;
                     for (const a of md.artwork) {
-                        const m = (a.sizes || '').match(/(\d+)x(\d+)/);
-                        const area = m ? parseInt(m[1], 10) * parseInt(m[2], 10) : 0;
+                        // `sizes` may list several "WxH" tokens; score by the largest.
+                        let area = 0;
+                        for (const tok of (a.sizes || '').split(/\s+/)) {
+                            const m = tok.match(/(\d+)x(\d+)/);
+                            if (m) area = Math.max(area, parseInt(m[1], 10) * parseInt(m[2], 10));
+                        }
                         if (area >= bestArea) { bestArea = area; best = a; }
                     }
                     let src = best.src || '';
-                    // googleusercontent URLs accept a size suffix; upscale if present.
-                    if (src) src = src.replace(/=w\d+-h\d+-.*$/, '=w544-h544-l90-rj');
+                    // googleusercontent URLs carry a size suffix in one of two forms
+                    // (=wN-hN-... or =sN-...); upscale whichever is present.
+                    if (src) {
+                        src = src.replace(/=w\d+-h\d+(-[^/]*)?$/, '=w544-h544-l90-rj')
+                                 .replace(/=s\d+(-[^/]*)?$/, '=s544');
+                    }
                     return src;
                 }
 
