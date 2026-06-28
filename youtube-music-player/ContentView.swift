@@ -47,6 +47,10 @@ struct ContentView: View {
                 ImportSheet(coordinator: coordinator)
             }
         }
+        .onChange(of: importLauncher.isPresented) { _, presented in
+            guard presented, let coordinator = importCoordinator else { return }
+            coordinator.resetForPresentation()
+        }
         .onChange(of: importLauncher.isDiagnosticPresented) { _, presented in
             guard presented, let coordinator = importCoordinator else { return }
             importLauncher.isDiagnosticPresented = false

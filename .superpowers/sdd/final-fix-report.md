@@ -58,6 +58,51 @@ Matcher self-check PASS
 ** BUILD SUCCEEDED **
 ```
 
+---
+
+## Codex Review Wave 2 — P1 + P2 Fixes
+
+### P1 — matching-cancel strands UI for empty/non-importable sources
+**File:** `youtube-music-player/Import/ImportCoordinator.swift` line 152-155  
+**Change:** Removed `if !cancelled` guard on `phase = .review` in the empty-uniqueTracks early-return. Both exit points from `startMatching()` now unconditionally set `phase = .review` (the post-task-group path was already unconditional from a prior fix wave). No return path leaves `phase == .matching`.  
+**Note:** The second exit point flagged (post-task-group ~line 190) was already fixed (`phase = .review` unconditional) — only the early-return guard required this change.
+
+### P2 — narrow transfer-playlists nav interception
+**File:** `youtube-music-player/YouTubeMusicWebView.swift` line 260  
+**Change:** Changed `raw.contains("transfer") || raw.contains("musicpremium")` to `raw.contains("transfer") && (raw.contains("youtubemusic") || raw.contains("musicpremium"))`. Unrelated YT Music Premium help pages (which contain "musicpremium" but no "transfer") now fall through to `NSWorkspace.shared.open` instead of opening the importer. Comment updated to document the narrowed heuristic.
+
+### Clean Build Result
+
+```
+** BUILD SUCCEEDED **
+```
+
+**Commit:** `a3835d5` — fix: recover phase on matching-cancel for empty sources; narrow transfer-link intercept
+
+## Codex Review Wave 3 — P1 + P2 Fixes
+
+### P1 — ImportCoordinator state is stale on sheet re-presentation
+**Files:**
+- `youtube-music-player/Import/ImportCoordinator.swift`: Added `func resetForPresentation()` (line ~63) that sets `phase` to `.pickSources` if `spotifyAuth.isConnected`, else `.connect`; sets `isYTMusicSignedIn = true`; clears `needsReview`, `report`, `errorMessage`, `progress`, `autoAcceptedCount`, `selectedPlaylistIDs`, `allMatches`, `importSources`, `cancelled`, `cachedYTClient`.
+- `youtube-music-player/ContentView.swift`: Added `.onChange(of: importLauncher.isPresented)` that calls `coordinator.resetForPresentation()` when transitioning to `true`. Sheet re-presentation now always starts from a clean state; the YTM-not-signed-in gate re-evaluates on the next `startMatching()` call.
+
+### P2 — SAPISIDHASH staleness on long InnerTube runs
+**Files:**
+- `youtube-music-player/YTMusic/YTMusicModels.swift`: Replaced `let authorization: String` with `let sapisid: String` in `YTMusicSession`.
+- `youtube-music-player/YTMusic/YTMusicAuth.swift`: Removed one-time `authorization` computation; `snapshot()` now populates `sapisid` directly from the extracted `__Secure-3PAPISID` value.
+- `youtube-music-player/YTMusic/YTMusicClient.swift` (`post()` line ~92): `Authorization` header now recomputed per-request via `SAPISIDHash.authorization(sapisid: session.sapisid, origin: ..., timestamp: Int(Date().timeIntervalSince1970))`. Eliminates mid-run 401s on long imports.
+
+### Verify
+
+**SAPISIDHASH self-check:** `SAPISIDHash self-check PASS`
+
+**Clean build:**
+```
+** BUILD SUCCEEDED **
+```
+
+---
+
 ## Notes
 
 - context7 was NOT used — all changes were based on reading the existing codebase and stdlib knowledge.

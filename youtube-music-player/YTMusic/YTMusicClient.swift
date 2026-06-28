@@ -89,7 +89,9 @@ final class YTMusicClient {
 		req.httpMethod = "POST"
 		req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 		req.setValue("*/*", forHTTPHeaderField: "Accept")
-		req.setValue(session.authorization, forHTTPHeaderField: "Authorization")
+		// ponytail: recompute per-request — SAPISIDHASH embeds a timestamp, stale values 401 on long runs
+		let ts = Int(Date().timeIntervalSince1970)
+		req.setValue(SAPISIDHash.authorization(sapisid: session.sapisid, origin: "https://music.youtube.com", timestamp: ts), forHTTPHeaderField: "Authorization")
 		req.setValue(session.cookieHeader, forHTTPHeaderField: "Cookie")
 		req.setValue(session.authUser, forHTTPHeaderField: "X-Goog-AuthUser")
 		req.setValue("https://music.youtube.com", forHTTPHeaderField: "Origin")

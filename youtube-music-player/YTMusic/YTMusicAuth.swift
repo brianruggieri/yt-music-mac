@@ -28,15 +28,7 @@ final class YTMusicAuth {
 		// 2. Build Cookie header — join all youtube.com cookies
 		let cookieHeader = ytCookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
 
-		// 3. Build signed Authorization header
-		let timestamp = Int(Date().timeIntervalSince1970)
-		let authorization = SAPISIDHash.authorization(
-			sapisid: sapisid,
-			origin: "https://music.youtube.com",
-			timestamp: timestamp
-		)
-
-		// 4. Read ytcfg from the live page — one-shot JS, returns JSON string or null
+		// 3. Read ytcfg from the live page — one-shot JS, returns JSON string or null
 		let js = """
 		(function(){try{return JSON.stringify({
 		  apiKey: window.ytcfg && window.ytcfg.get('INNERTUBE_API_KEY'),
@@ -65,7 +57,7 @@ final class YTMusicAuth {
 
 		return YTMusicSession(
 			cookieHeader: cookieHeader,
-			authorization: authorization,
+			sapisid: sapisid,
 			visitorId: visitorId,
 			authUser: authUser,
 			apiKey: apiKey,

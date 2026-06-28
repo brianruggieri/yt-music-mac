@@ -59,6 +59,23 @@ final class ImportCoordinator: ObservableObject {
 
     // MARK: - Public Methods
 
+    /// Resets to a clean starting state each time the import sheet is (re-)presented.
+    /// Optimistically sets isYTMusicSignedIn=true; startMatching() re-gates if the session is missing.
+    func resetForPresentation() {
+        phase = spotifyAuth.isConnected ? .pickSources : .connect
+        isYTMusicSignedIn = true
+        needsReview = []
+        report = ImportReport()
+        errorMessage = nil
+        progress = 0
+        autoAcceptedCount = 0
+        selectedPlaylistIDs = []
+        allMatches = [:]
+        importSources = []
+        cancelled = false
+        cachedYTClient = nil
+    }
+
     /// Opens Spotify OAuth. Moves to .pickSources on success.
     func connectSpotify() async {
         errorMessage = nil

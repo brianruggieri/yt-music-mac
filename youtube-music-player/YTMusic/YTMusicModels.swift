@@ -22,7 +22,7 @@ struct YTMCandidate: Identifiable, Equatable {
 
 struct YTMusicSession {
 	let cookieHeader: String
-	let authorization: String
+	let sapisid: String
 	let visitorId: String?
 	let authUser: String
 	let apiKey: String
