@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var webViewModel = YouTubeMusicViewModel()
     @State private var mediaKeyHandler = MediaKeyHandler()
     @State private var discordRPC = DiscordRPC()
+    @State private var didRegisterObservers = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,6 +23,10 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         .onAppear {
+            // onAppear can fire more than once; the observer API appends, so register
+            // exactly once to avoid stacking duplicate Now Playing / Discord callbacks.
+            guard !didRegisterObservers else { return }
+            didRegisterObservers = true
             mediaKeyHandler.setViewModel(webViewModel)
             setupDiscordPresence()
         }
