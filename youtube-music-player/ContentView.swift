@@ -18,6 +18,7 @@ struct ContentView: View {
     // its own body; ContentView only needs the reference and the shared isPresented flag.
     @ObservedObject private var importLauncher = ImportLauncher.shared
     @State private var importCoordinator: ImportCoordinator?
+    @State private var diagnosticResult: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,6 +46,22 @@ struct ContentView: View {
             if let coordinator = importCoordinator {
                 ImportSheet(coordinator: coordinator)
             }
+        }
+        .onChange(of: importLauncher.isDiagnosticPresented) { _, presented in
+            guard presented, let coordinator = importCoordinator else { return }
+            importLauncher.isDiagnosticPresented = false
+            Task {
+                let result = await coordinator.runWriteDiagnostic()
+                diagnosticResult = result
+            }
+        }
+        .alert("YTM Write Diagnostic", isPresented: Binding(
+            get: { diagnosticResult != nil },
+            set: { if !$0 { diagnosticResult = nil } }
+        )) {
+            Button("OK") { diagnosticResult = nil }
+        } message: {
+            Text(diagnosticResult ?? "")
         }
     }
 

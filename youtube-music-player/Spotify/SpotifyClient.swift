@@ -110,6 +110,17 @@ private struct TrackPage: Decodable {
 
 private struct TrackItem: Decodable {
 	let track: TrackObject?
+
+	// Custom init: podcast episodes have a different JSON shape (no `artists`),
+	// which causes TrackObject to throw. Decode track faillably so a single
+	// episode doesn't abort the whole page; mapTrackItem already skips nil tracks.
+	// ponytail: if Spotify adds new non-track item types, this handles them too
+	init(from decoder: Decoder) throws {
+		let c = try decoder.container(keyedBy: CodingKeys.self)
+		track = try? c.decode(TrackObject.self, forKey: .track)
+	}
+
+	private enum CodingKeys: String, CodingKey { case track }
 }
 
 private struct TrackObject: Decodable {

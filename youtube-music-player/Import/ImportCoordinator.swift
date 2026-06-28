@@ -187,7 +187,10 @@ final class ImportCoordinator: ObservableObject {
             }
         }
 
-        if !cancelled { phase = .review }
+        // Always transition to .review — partial needsReview is preserved and the
+        // user can proceed or re-run. Leaving phase == .matching on cancel would
+        // strand the UI on the progress screen with no exit.
+        phase = .review
     }
 
     /// Call after the user has resolved `needsReview` items.
@@ -221,6 +224,33 @@ final class ImportCoordinator: ObservableObject {
         for source in importSources {
             guard !cancelled else { break }
 
+            // Collect video IDs first; nil chosen = user skipped.
+            // ponytail: Matcher guarantees chosen != nil for .high — assert so a future
+            // Matcher change can't silently drop auto-accepted tracks into report.skipped.
+            var videoIDs: [String] = []
+            for track in source.tracks {
+                guard let match = allMatches[track.id] else {
+                    report.skipped += 1
+                    continue
+                }
+                assert(match.confidence != .high || match.chosen != nil,
+                       "high-confidence match must have chosen set")
+                if let chosen = match.chosen {
+                    videoIDs.append(chosen.videoId)
+                } else {
+                    report.skipped += 1
+                }
+            }
+
+            // Skip creating a playlist when every track was unmatched or skipped —
+            // an empty YTM playlist provides no value and pollutes the user's library.
+            guard !videoIDs.isEmpty else {
+                report.failed.append(ImportFailure(
+                    track: nil,
+                    reason: "Skipped \"\(source.label)\" — no matched tracks to import"))
+                continue
+            }
+
             let playlistID: String
             do {
                 playlistID = try await withRetry {
@@ -231,24 +261,6 @@ final class ImportCoordinator: ObservableObject {
                     track: nil,
                     reason: "Create \"\(source.label)\": \(error.localizedDescription)"))
                 continue
-            }
-
-            // Collect video IDs; nil chosen = user skipped
-            var videoIDs: [String] = []
-            for track in source.tracks {
-                guard let match = allMatches[track.id] else {
-                    report.skipped += 1
-                    continue
-                }
-                // ponytail: Matcher guarantees chosen != nil for .high — assert so a future
-                // Matcher change can't silently drop auto-accepted tracks into report.skipped.
-                assert(match.confidence != .high || match.chosen != nil,
-                       "high-confidence match must have chosen set")
-                if let chosen = match.chosen {
-                    videoIDs.append(chosen.videoId)
-                } else {
-                    report.skipped += 1
-                }
             }
 
             // Add in batches of 25
@@ -277,7 +289,9 @@ final class ImportCoordinator: ObservableObject {
             }
         }
 
-        if !cancelled { phase = .done }
+        // Always transition to .done — partial report is preserved and displayed.
+        // Leaving phase == .importing on cancel would strand the UI on the progress screen.
+        phase = .done
     }
 
     /// Searches YouTube Music for `query`. Never throws — returns [] on failure.
@@ -294,6 +308,26 @@ final class ImportCoordinator: ObservableObject {
     /// Stops issuing new work. Preserves partial `needsReview` and `report`.
     func cancel() {
         cancelled = true
+    }
+
+    /// Runs the YTM write preflight (create → add → delete) and returns a human-readable result.
+    /// Never throws — all errors are surfaced in the returned string.
+    func runWriteDiagnostic() async -> String {
+        do {
+            let session = try await ytMusicAuth.snapshot()
+            let client = YTMusicClient(session: session)
+            let result = await YTMusicDiagnostic.runWritePreflight(client)
+            switch result {
+            case .success:
+                return "Write preflight PASSED — create / add / delete all succeeded."
+            case .failure(let e):
+                return "Write preflight FAILED: \(e.localizedDescription)"
+            }
+        } catch YTMusicAuthError.notSignedIn {
+            return "Write preflight SKIPPED — not signed in to YouTube Music."
+        } catch {
+            return "Write preflight SKIPPED — session error: \(error.localizedDescription)"
+        }
     }
 }
 

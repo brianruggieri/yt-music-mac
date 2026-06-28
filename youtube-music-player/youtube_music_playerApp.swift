@@ -22,6 +22,11 @@ struct youtube_music_playerApp: App {
                 Button("Import from Spotify…") {
                     ImportLauncher.shared.isPresented = true
                 }
+                #if DEBUG
+                Button("Run YouTube Music Write Diagnostic") {
+                    ImportLauncher.shared.isDiagnosticPresented = true
+                }
+                #endif
             }
         }
     }

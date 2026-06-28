@@ -5,4 +5,6 @@ final class ImportLauncher: ObservableObject {
     static let shared = ImportLauncher()
     private init() {}
     @Published var isPresented = false
+    /// Set to true to trigger the YTM write diagnostic (debug menu → ContentView → coordinator).
+    @Published var isDiagnosticPresented = false
 }

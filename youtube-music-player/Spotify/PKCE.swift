@@ -7,7 +7,10 @@ enum PKCE {
     /// Length is within the 43–128 range required by RFC 7636.
     static func verifier() -> String {
         var bytes = [UInt8](repeating: 0, count: 64)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        // Fail-closed: a zero-filled buffer would yield a deterministic verifier,
+        // which is a security failure. RNG failure is unrecoverable — trap.
+        precondition(status == errSecSuccess, "SecRandomCopyBytes failed with status \(status)")
         return Data(bytes).base64URLEncoded
     }
 
