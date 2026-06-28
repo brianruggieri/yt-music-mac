@@ -152,14 +152,27 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                     }
                 }
 
-                // Poll for track changes. The 500ms interval (2x/sec) already catches
-                // title/artist/play-state changes. A document.body subtree
-                // MutationObserver previously also ran sendTrackInfo on every DOM
-                // mutation. Measured on WebKit: ~0/sec while idle or paused, but
-                // ~5-8/sec during playback (the progress bar and time readout mutate
-                // constantly) — 2-4x the poll, all redundant since the poll already
-                // covers the same fields within 500ms.
-                setInterval(sendTrackInfo, 500);
+                // Drive updates off the <video> element's own events. On a track
+                // change / play / pause these fire within ~180-230ms (measured on
+                // WebKit), vs up to 500ms waiting for the poll below, and they fire
+                // ~0 times during steady playback — so this restores low-latency
+                // metadata without the per-frame cost of a body MutationObserver.
+                // Excluded on purpose: 'timeupdate' (fires ~4x/sec) and 'emptied'
+                // (fires mid-transition while video.paused is briefly true, which
+                // would emit a false "paused" flicker before 'play' lands ~100ms later).
+                function hookVideo() {
+                    const v = document.querySelector('video');
+                    if (!v || v.__ytmHooked) return;
+                    v.__ytmHooked = true;
+                    ['loadedmetadata', 'play', 'pause', 'playing']
+                        .forEach(e => v.addEventListener(e, sendTrackInfo));
+                }
+
+                // Poll as a safety net: catches metadata that lands after the video
+                // events (e.g. artist filled in late) and re-hooks if YT swaps the
+                // <video> element. sendTrackInfo dedupes, so the extra calls are cheap.
+                setInterval(function() { hookVideo(); sendTrackInfo(); }, 500);
+                hookVideo();
             })();
         """#
         let trackScript = WKUserScript(source: trackObserverJs, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
