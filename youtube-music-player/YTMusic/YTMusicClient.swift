@@ -94,6 +94,7 @@ final class YTMusicClient {
 		req.setValue(session.authUser, forHTTPHeaderField: "X-Goog-AuthUser")
 		req.setValue("https://music.youtube.com", forHTTPHeaderField: "Origin")
 		req.setValue("https://music.youtube.com", forHTTPHeaderField: "x-origin")
+		req.setValue("https://music.youtube.com/", forHTTPHeaderField: "Referer")
 		if let vid = session.visitorId { req.setValue(vid, forHTTPHeaderField: "X-Goog-Visitor-Id") }
 
 		var fullBody = body
@@ -157,8 +158,8 @@ final class YTMusicClient {
 		let videoId = watchEp?["videoId"] as? String
 		let videoType = watchEp?
 			.typed("watchEndpointMusicSupportedConfigs")?
-			.typed("watchEndpointMusicConfig")?
-			["musicVideoType"] as? String
+			.typed("watchEndpointMusicConfig")
+			.flatMap { $0["musicVideoType"] as? String }
 
 		// Item's own browse ID for non-playable types
 		let itemBrowseId = (item["navigationEndpoint"] as? [String: Any])?
