@@ -41,6 +41,12 @@ class DiscordRPC {
             socket = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
             if socket < 0 { continue }
 
+            // Without SO_NOSIGPIPE, writing to a socket Discord has closed raises
+            // SIGPIPE, which by default kills the whole app before send()'s return
+            // value can be inspected. Suppress it so writes fail with EPIPE instead.
+            var nosigpipe: Int32 = 1
+            setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, socklen_t(MemoryLayout<Int32>.size))
+
             var addr = sockaddr_un()
             addr.sun_family = sa_family_t(AF_UNIX)
 
@@ -139,6 +145,11 @@ class DiscordRPC {
     func clearPresence() {
         guard isConnected else { return }
 
+        // Forget the current track so resuming it later recomputes a fresh start
+        // time instead of showing elapsed time accrued across the stopped interval.
+        lastTrackKey = ""
+        trackStartMs = 0
+
         let payload: [String: Any] = [
             "cmd": "SET_ACTIVITY",
             "args": [
@@ -172,11 +183,21 @@ class DiscordRPC {
         var message = header
         message.append(contentsOf: jsonData)
 
-        let sent = Darwin.send(socket, message, message.count, 0)
-        if sent < 0 {
-            // Discord went away (e.g. quit). Tear down so the next updatePresence
-            // reconnects instead of writing to a dead fd forever.
-            disconnect()
+        // send() on a stream socket may write fewer bytes than requested; a partial
+        // write would leave Discord with a truncated, misframed IPC packet. Loop until
+        // the whole frame is out, and tear down on any error so the next
+        // updatePresence reconnects instead of writing to a dead fd forever.
+        var total = 0
+        message.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            while total < message.count {
+                let n = Darwin.send(socket, base + total, message.count - total, 0)
+                if n <= 0 {
+                    disconnect()
+                    return
+                }
+                total += n
+            }
         }
     }
 
