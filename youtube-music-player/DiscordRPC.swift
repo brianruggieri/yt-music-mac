@@ -7,6 +7,11 @@ class DiscordRPC {
     private var socket: Int32 = -1
     private var isConnected = false
 
+    // Track identity + start time so the Discord "elapsed" timestamp stays stable
+    // for the current song instead of resetting on every updatePresence call.
+    private var lastTrackKey = ""
+    private var trackStartMs = 0
+
     init() {
         connect()
     }
@@ -22,19 +27,9 @@ class DiscordRPC {
 
         var socketPaths = ["/tmp/discord-ipc-0", "/var/tmp/discord-ipc-0"]
 
-        let fileManager = FileManager.default
-        if let enumerator = fileManager.enumerator(atPath: "/var/folders") {
-            while let path = enumerator.nextObject() as? String {
-                if path.hasSuffix("discord-ipc-0") {
-                    socketPaths.insert("/var/folders/\(path)", at: 0)
-                    break
-                }
-                if path.components(separatedBy: "/").count > 4 {
-                    enumerator.skipDescendants()
-                }
-            }
-        }
-
+        // The Discord socket normally lives in the Darwin per-user temp dir, which
+        // confstr returns directly. The old fallback crawled all of /var/folders
+        // on the main thread to find it — slow and pointless given this lookup.
         var buffer = [CChar](repeating: 0, count: 1024)
         confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, buffer.count)
         let darwinTmp = String(cString: buffer)
@@ -112,11 +107,19 @@ class DiscordRPC {
             assets["large_text"] = title
         }
 
+        // Only reset the start timestamp when the track actually changes; otherwise
+        // re-sending presence (play/pause, poller) would keep restarting elapsed.
+        let trackKey = "\(title)\u{0}\(artist)"
+        if trackKey != lastTrackKey {
+            lastTrackKey = trackKey
+            trackStartMs = Int(Date().timeIntervalSince1970 * 1000)
+        }
+
         let activity: [String: Any] = [
             "details": title,
             "state": "by \(artist)",
             "timestamps": [
-                "start": Int(Date().timeIntervalSince1970 * 1000)
+                "start": trackStartMs
             ],
             "assets": assets
         ]
@@ -169,7 +172,12 @@ class DiscordRPC {
         var message = header
         message.append(contentsOf: jsonData)
 
-        Darwin.send(socket, message, message.count, 0)
+        let sent = Darwin.send(socket, message, message.count, 0)
+        if sent < 0 {
+            // Discord went away (e.g. quit). Tear down so the next updatePresence
+            // reconnects instead of writing to a dead fd forever.
+            disconnect()
+        }
     }
 
     func disconnect() {
