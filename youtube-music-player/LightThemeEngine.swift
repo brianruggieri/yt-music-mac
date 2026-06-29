@@ -220,8 +220,13 @@ enum LightThemeEngine {
         //  - a crisper hairline divider tone than a raw invert gives
         const ENHANCE = [
             ['html, body', 'background-color: var(--ytmusic-background)'],
-            ['ytmusic-thumbnail-renderer, #thumbnail.ytmusic-thumbnail-renderer',
-                'box-shadow: 0 1px 2px rgba(0,0,0,0.12); border-radius: 8px'],
+            // No elevation shadow on thumbnails — YT's own (dark) UI never shadows cover
+            // art, and our added shadow only created problems on light: the renderer's
+            // border-radius (8px) didn't match the image's native radius (12px), so the
+            // shadow traced a squarer box than the image and left a gap at the corners.
+            // The artwork already reads fine on the light surface (it's imagery, not a
+            // flat card), so we match dark mode and draw nothing. (Genuinely low-contrast
+            // card surfaces still get a hairline via auditSurfaces() — that's unaffected.)
             ['ytmusic-carousel-shelf-renderer, ytmusic-shelf-renderer',
                 'border-color: rgba(0,0,0,0.08)'],
             // Unselected category chips: defined outlined pills so they read as
