@@ -125,6 +125,10 @@ final class ImportCoordinator: ObservableObject {
         } catch {
             guard gen == runGeneration else { return }
             errorMessage = error.localizedDescription
+            // Stored token is stale/revoked (or load failed) — fall back to Connect so
+            // the "Connect Spotify" button is reachable instead of stranding the user on
+            // an empty, disabled playlist screen. Connect re-runs OAuth → fresh tokens.
+            phase = .connect
         }
     }
 
@@ -277,8 +281,19 @@ final class ImportCoordinator: ObservableObject {
         report = ImportReport()
         errorMessage = nil
 
-        // Merge user edits from needsReview back into allMatches
-        for r in needsReview { allMatches[r.track.id] = r }
+        // Merge review rows back into allMatches. A row the user explicitly resolved
+        // (accepted/skipped) is used as-is. A row left UNREVIEWED is NOT imported —
+        // we force its chosen to nil so an unvetted low-confidence guess never lands
+        // in the playlist (the review step is opt-in to include, not opt-out).
+        for r in needsReview {
+            if resolvedReviewIDs.contains(r.track.id) {
+                allMatches[r.track.id] = r
+            } else {
+                var unreviewed = r
+                unreviewed.chosen = nil
+                allMatches[r.track.id] = unreviewed
+            }
+        }
 
         let ytClient: YTMusicClient
         do {

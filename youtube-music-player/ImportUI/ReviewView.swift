@@ -6,9 +6,12 @@ struct ReviewView: View {
 	@ObservedObject var coordinator: ImportCoordinator
 	@State private var isConfirming = false
 
-	/// Tracks that will be imported: auto-accepted + review items with a chosen candidate.
+	/// Tracks that will be imported: auto-accepted (high) + review rows the user
+	/// explicitly resolved AND accepted. Unreviewed low-confidence rows don't import.
 	private var importCount: Int {
-		coordinator.autoAcceptedCount + coordinator.needsReview.filter { $0.chosen != nil }.count
+		coordinator.autoAcceptedCount + coordinator.needsReview.filter {
+			coordinator.resolvedReviewIDs.contains($0.track.id) && $0.chosen != nil
+		}.count
 	}
 
 	/// Review items the user hasn't accepted/skipped yet.
