@@ -16,7 +16,7 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Window header for dragging
-            WindowHeader()
+            WindowHeader(color: webViewModel.headerColor)
                 .frame(height: 32)
 
             YouTubeMusicWebView(viewModel: webViewModel)
@@ -49,15 +49,19 @@ struct ContentView: View {
 }
 
 struct WindowHeader: NSViewRepresentable {
+    // Tracks YT Music's nav-bar color so the header matches its current theme.
+    var color: NSColor
+
     func makeNSView(context: Context) -> NSView {
         let view = DraggableHeaderView()
         view.wantsLayer = true
-        // Match YouTube Music's dark header (#212121)
-        view.layer?.backgroundColor = NSColor(red: 0.129, green: 0.129, blue: 0.129, alpha: 1.0).cgColor
+        view.layer?.backgroundColor = color.cgColor
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        nsView.layer?.backgroundColor = color.cgColor
+    }
 }
 
 class DraggableHeaderView: NSView {

@@ -1,0 +1,18 @@
+{
+  "name": "ytm-light-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Playwright-WebKit harness: drives music.youtube.com with our light-theme engine injected, then contrast-audits and screenshots every defined screen in both themes.",
+  "scripts": {
+    "setup": "playwright install webkit",
+    "auth": "playwright open --browser=webkit --save-storage=auth.json https://music.youtube.com",
+    "import-cookies": "node lib/import-cookies.js",
+    "test": "playwright test",
+    "update": "playwright test --update-snapshots",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

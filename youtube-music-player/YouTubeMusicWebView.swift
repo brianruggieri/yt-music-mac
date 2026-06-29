@@ -6,6 +6,11 @@ import WebKit
 class YouTubeMusicViewModel {
     weak var webView: WKWebView?
 
+    // Background color of YT Music's nav bar, mirrored onto the native window
+    // header so it tracks the web app's theme (dark / light / system). Defaults
+    // to YT Music's dark header until the page reports its rendered color.
+    var headerColor: NSColor = NSColor(srgbRed: 0.129, green: 0.129, blue: 0.129, alpha: 1.0)
+
     // Multiple consumers observe track changes (Now Playing, Discord). Use a list
     // instead of a single closure so registration order can't silently clobber
     // one observer with another.
@@ -52,10 +57,20 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
 
         // Inject scrollbar CSS at document start
+        // Thumb colors are read from a CSS variable on <html>; the theme observer
+        // script flips data-ytm-theme so the scrollbars follow YT Music's light/dark.
         let css = """
+            html {
+                --ytm-sb-thumb: rgba(255, 255, 255, 0.15);
+                --ytm-sb-thumb-hover: rgba(255, 255, 255, 0.25);
+            }
+            html[data-ytm-theme="light"] {
+                --ytm-sb-thumb: rgba(0, 0, 0, 0.18);
+                --ytm-sb-thumb-hover: rgba(0, 0, 0, 0.30);
+            }
             *, *::before, *::after {
                 scrollbar-width: thin !important;
-                scrollbar-color: rgba(255,255,255,0.15) transparent !important;
+                scrollbar-color: var(--ytm-sb-thumb) transparent !important;
             }
             ::-webkit-scrollbar {
                 width: 14px !important;
@@ -65,13 +80,13 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 background: transparent !important;
             }
             ::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.15) !important;
+                background: var(--ytm-sb-thumb) !important;
                 border-radius: 100px !important;
                 border-right: 3px solid transparent !important;
                 background-clip: padding-box !important;
             }
             ::-webkit-scrollbar-thumb:hover {
-                background: rgba(255, 255, 255, 0.25) !important;
+                background: var(--ytm-sb-thumb-hover) !important;
                 border-right: 3px solid transparent !important;
                 background-clip: padding-box !important;
             }
@@ -179,6 +194,61 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         config.userContentController.addUserScript(trackScript)
         config.userContentController.add(context.coordinator, name: "trackInfo")
 
+        // Theme observer: read YT Music's actual rendered nav-bar background. Reading
+        // the computed color (rather than a YT class name) resolves dark / light /
+        // "system" uniformly, since the page has already applied the user's setting.
+        let themeObserverJs = #"""
+            (function() {
+                let last = null;
+
+                function pickBackground() {
+                    // First non-transparent background, most-specific surface first.
+                    for (const sel of ['ytmusic-nav-bar', 'ytmusic-app-layout', 'body', 'html']) {
+                        const el = document.querySelector(sel);
+                        if (!el) continue;
+                        const bg = getComputedStyle(el).backgroundColor;
+                        const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+                        if (m && (m[4] === undefined || parseFloat(m[4]) > 0)) {
+                            return { r: +m[1], g: +m[2], b: +m[3] };
+                        }
+                    }
+                    return { r: 33, g: 33, b: 33 };
+                }
+
+                function update() {
+                    const c = pickBackground();
+                    const key = c.r + ',' + c.g + ',' + c.b;
+                    if (key === last) return;
+                    last = key;
+                    // Rec. 709 luma; < 128 reads as a dark surface.
+                    const isDark = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) < 128;
+                    document.documentElement.setAttribute('data-ytm-theme', isDark ? 'dark' : 'light');
+                    window.webkit.messageHandlers.theme.postMessage(c);
+                }
+
+                setInterval(update, 1000);
+                update();
+            })();
+        """#
+        let themeScript = WKUserScript(source: themeObserverJs, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        config.userContentController.addUserScript(themeScript)
+        config.userContentController.add(context.coordinator, name: "theme")
+
+        // Light-theme engine: learns YT Music's design tokens and derives a light
+        // palette (see LightThemeEngine). Runs at document start so the override
+        // <style> exists before first paint; gated on macOS appearance internally.
+        // Seed the light-theme engine with the real system appearance at document
+        // start — a WKWebView's prefers-color-scheme isn't reliably settled this early,
+        // so without this the theme can miss light mode on load until a system toggle.
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let seedScript = WKUserScript(source: "window.__ytmNativeDark = \(isDark ? "true" : "false");",
+                                      injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        config.userContentController.addUserScript(seedScript)   // before the engine, so it reads the seed
+
+        let lightScript = WKUserScript(source: LightThemeEngine.script, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        config.userContentController.addUserScript(lightScript)
+
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
@@ -217,6 +287,13 @@ struct YouTubeMusicWebView: NSViewRepresentable {
 
                 Task { @MainActor in
                     self.viewModel.notifyTrackChange(title: title, artist: artist, artworkUrl: artworkUrl, isPlaying: isPlaying)
+                }
+            } else if message.name == "theme",
+                      let body = message.body as? [String: Any],
+                      let r = body["r"] as? Int, let g = body["g"] as? Int, let b = body["b"] as? Int {
+                let color = NSColor(srgbRed: CGFloat(r) / 255.0, green: CGFloat(g) / 255.0, blue: CGFloat(b) / 255.0, alpha: 1.0)
+                Task { @MainActor in
+                    self.viewModel.headerColor = color
                 }
             }
         }
