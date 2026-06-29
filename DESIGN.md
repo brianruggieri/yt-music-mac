@@ -97,13 +97,13 @@ In light mode it appears in exactly three contexts. Everywhere else stays neutra
 - Selected sidebar / nav item: a `#FF0033` leading indicator bar or dot (the label
   text stays near-black for legibility; red is the *marker*, not the *word*).
 
-### 2. Primary play affordance — "the one button"
-- The main play / shuffle button: **red circle (`#FF0033`) with a white knockout glyph.**
-  Today the engine pins this button near-black (`rgb(3,3,3)`) so the knockout stays
-  visible on a light surface. The brand move is to flip the *circle* to `#FF0033` and
-  the *triangle* to white — white-on-red is 4:1, clears 3:1 for the large glyph.
-- Only the **primary** action goes red. Secondary controls (next/prev, like, repeat)
-  stay neutral near-black so the one red button is unmistakable.
+### 2. Play buttons — the brand mark
+- **Every** filled play circle (`ytmusic-play-button-renderer`) is a `#FF0033` circle
+  with a white triangle — header CTA, sidebar/playlist hover buttons, inline rows.
+  It mirrors the logo's play glyph, so red consistently means "play" across the app.
+  White-on-red is ~4:1, clears 3:1 for the glyph.
+- Transport play/pause in the player bar is a different element
+  (`tp-yt-paper-icon-button`) and stays neutral near-black.
 
 ### 3. Hover / active accents — red threaded through navigation
 - Section **"More"** / "Show all" links → Red Ink `#CC0029`.
@@ -139,7 +139,9 @@ Rings render on `:focus-visible` only, so mouse clicks never draw them.
 Light surfaces need help reading as layered (dark mode gets depth for free from
 glow; light needs shadow + edges).
 
-- **Thumbnails / cards**: soft two-stop elevation shadow + 8px radius (`ENHANCE`).
+- **Thumbnails / cards**: a single tight elevation shadow that hugs the image
+  (`0 1px 4px rgba(0,0,0,0.18)`) + 8px radius (`ENHANCE`). Deliberately *not* a wide
+  soft halo — the shadow should read as the image lifting slightly, not floating.
 - **Shelves / carousels**: `rgba(0,0,0,0.08)` hairline so sections separate.
 - **Unselected category chips**: outlined pills (subtle fill + `rgba(0,0,0,0.22)`
   border) so they read as buttons; the **selected** chip keeps YT's filled style, so

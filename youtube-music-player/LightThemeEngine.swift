@@ -197,22 +197,14 @@ enum LightThemeEngine {
             // inversion can't reach — white-on-#DEDEDE is 1.35:1 (fails WCAG 1.4.11). Pin
             // them dark, the same way the account menu's icons are handled just above.
             ['ytmusic-menu-popup-renderer yt-icon, ytmusic-menu-popup-renderer svg', 'color: rgb(20, 20, 20); fill: rgb(20, 20, 20)'],
-            // Play-button "knockout": YT's filled play button is an always-white brand
-            // circle with the triangle cut out in var(--ytmusic-background). Dark mode →
-            // dark triangle on white (visible); our light --ytmusic-background made it
-            // near-white on white (invisible). Pin the knockout dark, as dark mode draws it.
-            ['ytmusic-play-button-renderer yt-icon, ytmusic-play-button-renderer svg', 'color: rgb(3, 3, 3); fill: rgb(3, 3, 3)'],
-            // PRIMARY play affordance (DESIGN.md): the one big header Play button on an
-            // album/playlist/artist page becomes the brand-red circle with a WHITE
-            // knockout triangle — the single unmistakable action per page. Scoped to the
-            // header renderers so the small inline/guide play buttons stay neutral (red
-            // kept rare so it keeps meaning). These selectors are more specific than the
-            // generic dark-knockout rule above, so the white glyph wins over rgb(3,3,3).
-            // White-on-#ff0033 is 4.0:1 → clears the 3:1 bar for the large glyph.
-            ['ytmusic-responsive-header-renderer ytmusic-play-button-renderer, ytmusic-detail-header-renderer ytmusic-play-button-renderer',
-                'background-color: #ff0033'],
-            ['ytmusic-responsive-header-renderer ytmusic-play-button-renderer yt-icon, ytmusic-responsive-header-renderer ytmusic-play-button-renderer svg, ytmusic-detail-header-renderer ytmusic-play-button-renderer yt-icon, ytmusic-detail-header-renderer ytmusic-play-button-renderer svg',
-                'color: #ffffff; fill: #ffffff'],
+            // Play buttons are the brand mark in light mode: EVERY filled play circle is
+            // YT red (#ff0033) with a white triangle — the header CTA, the sidebar/playlist
+            // hover buttons, inline rows. Matches the logo's play-button glyph, so red
+            // reads consistently as "play" everywhere. White-on-#ff0033 is ~4:1 → clears
+            // the 3:1 bar for the glyph. (Transport play/pause in the player bar is a
+            // different element, tp-yt-paper-icon-button, and stays neutral.)
+            ['ytmusic-play-button-renderer', 'background-color: #ff0033'],
+            ['ytmusic-play-button-renderer yt-icon, ytmusic-play-button-renderer svg', 'color: #ffffff; fill: #ffffff'],
         ];
 
         // Light-mode polish (tunable). The page's own top gradient is handled by the
@@ -224,7 +216,7 @@ enum LightThemeEngine {
         const ENHANCE = [
             ['html, body', 'background-color: var(--ytmusic-background)'],
             ['ytmusic-thumbnail-renderer, #thumbnail.ytmusic-thumbnail-renderer',
-                'box-shadow: 0 1px 3px rgba(0,0,0,0.14), 0 6px 18px rgba(0,0,0,0.08); border-radius: 8px'],
+                'box-shadow: 0 1px 4px rgba(0,0,0,0.18); border-radius: 8px'],
             ['ytmusic-carousel-shelf-renderer, ytmusic-shelf-renderer',
                 'border-color: rgba(0,0,0,0.08)'],
             // Unselected category chips: defined outlined pills so they read as
@@ -692,9 +684,13 @@ enum LightThemeEngine {
                 if (logoFetching) return;
                 if (!logoOrigSrc) logoOrigSrc = img.src;
                 logoFetching = true;
-                // keep #f03 (brand red), darken only the #fff wordmark glyphs
+                // Darken ONLY the wordmark. In YT's SVG the "Music" letters are one group
+                // (<g fill="#fff">…</g>); the play button is a separate #f03 circle whose
+                // ring (stroke="#fff") and triangle (fill="#fff") must STAY white. So we
+                // recolour just that group's fill — not a blanket #fff swap, which also
+                // darkened the triangle/ring and made the button look black.
                 fetch(logoOrigSrc).then(r => r.text()).then(svg => {
-                    const lit = svg.replace(/#ffffff/gi, '#0f0f0f').replace(/#fff(?![0-9a-f])/gi, '#0f0f0f');
+                    const lit = svg.replace(/<g fill="#fff">/i, '<g fill="#0f0f0f">');
                     logoUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(lit);
                 }).catch(() => {}).finally(() => { logoFetching = false; });
                 return;
