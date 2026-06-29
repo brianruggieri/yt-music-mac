@@ -188,11 +188,27 @@ enum LightThemeEngine {
             // can flip with a stylesheet rule; the surface is pinned inline (pinMenu)
             // because the Material `background: var()` rule beats our scoped !important.
             ['.ytmusicMultiPageMenuRendererHost yt-formatted-string, .ytmusicMultiPageMenuRendererHost .yt-core-attributed-string, .ytmusicMultiPageMenuRendererHost yt-icon, .ytmusicMultiPageMenuRendererHost #label', 'color: rgb(20, 20, 20)'],
+            // Track-row context menu (ytmusic-menu-popup-renderer): its service-item icons
+            // are svgs YT fills white through the Material var chain, which the token
+            // inversion can't reach — white-on-#DEDEDE is 1.35:1 (fails WCAG 1.4.11). Pin
+            // them dark, the same way the account menu's icons are handled just above.
+            ['ytmusic-menu-popup-renderer yt-icon, ytmusic-menu-popup-renderer svg', 'color: rgb(20, 20, 20); fill: rgb(20, 20, 20)'],
             // Play-button "knockout": YT's filled play button is an always-white brand
             // circle with the triangle cut out in var(--ytmusic-background). Dark mode →
             // dark triangle on white (visible); our light --ytmusic-background made it
             // near-white on white (invisible). Pin the knockout dark, as dark mode draws it.
             ['ytmusic-play-button-renderer yt-icon, ytmusic-play-button-renderer svg', 'color: rgb(3, 3, 3); fill: rgb(3, 3, 3)'],
+            // PRIMARY play affordance (DESIGN.md): the one big header Play button on an
+            // album/playlist/artist page becomes the brand-red circle with a WHITE
+            // knockout triangle — the single unmistakable action per page. Scoped to the
+            // header renderers so the small inline/guide play buttons stay neutral (red
+            // kept rare so it keeps meaning). These selectors are more specific than the
+            // generic dark-knockout rule above, so the white glyph wins over rgb(3,3,3).
+            // White-on-#ff0033 is 4.0:1 → clears the 3:1 bar for the large glyph.
+            ['ytmusic-responsive-header-renderer ytmusic-play-button-renderer, ytmusic-detail-header-renderer ytmusic-play-button-renderer',
+                'background-color: #ff0033'],
+            ['ytmusic-responsive-header-renderer ytmusic-play-button-renderer yt-icon, ytmusic-responsive-header-renderer ytmusic-play-button-renderer svg, ytmusic-detail-header-renderer ytmusic-play-button-renderer yt-icon, ytmusic-detail-header-renderer ytmusic-play-button-renderer svg',
+                'color: #ffffff; fill: #ffffff'],
         ];
 
         // Light-mode polish (tunable). The page's own top gradient is handled by the
@@ -213,6 +229,31 @@ enum LightThemeEngine {
             // filled style, so selected vs unselected stays clear.
             ['ytmusic-chip-cloud-chip-renderer:not([is-selected]) a.yt-simple-endpoint',
                 'background-color: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.22)'],
+        ];
+
+        // Brand red, used on purpose in a FEW active/hover places so it keeps meaning
+        // (DESIGN.md "Where red shows up"). The split-by-role rule: red TEXT and thin
+        // lines use Red Ink #cc0029 (AA-safe, ~5.3:1 on the #f3f3f3 surface — pure red
+        // is only ~3.6:1 and fails 4.5:1 for text); red FILLS/markers use brand #ff0033.
+        const RED = [
+            // Active/playing — the now-playing track title in the player bar reads as
+            // "this is live". It's text, so Red Ink. YT's own title rule is
+            // `.content-info-wrapper.ytmusic-player-bar .title.ytmusic-player-bar` (which
+            // the engine inverts to black !important), so we mirror it and add one more
+            // `.title` to win on specificity — equal-specificity would lose, since the
+            // engine's selector-fixes are emitted after this block.
+            ['.content-info-wrapper.ytmusic-player-bar .title.title.ytmusic-player-bar', 'color: #cc0029'],
+            // Active/playing — a red left marker on the selected sidebar (guide) item.
+            // The label text stays near-black for legibility; red is the marker, not the
+            // word. The app uses the guide drawer (no pivot bar); active entry carries
+            // the empty `active` attribute.
+            ['ytmusic-guide-entry-renderer[active] tp-yt-paper-item', 'box-shadow: inset 3px 0 0 0 #ff0033'],
+            // Hover/active accent — the selected player-page tab gets a Red Ink underline.
+            ['tp-yt-paper-tab.iron-selected', 'border-bottom: 2px solid #cc0029'],
+            // Hover/active accent — content link hover reads Red Ink (scoped to list/shelf
+            // links so it threads red through navigation without repainting every anchor).
+            ['ytmusic-responsive-list-item-renderer a.yt-simple-endpoint:hover, ytmusic-shelf-renderer a.yt-simple-endpoint:hover, ytmusic-carousel-shelf-renderer a.yt-simple-endpoint:hover',
+                'color: #cc0029'],
         ];
 
         // Keyboard focus rings — WCAG 2.4.7 (Focus Visible). YT's focus relies on
@@ -270,6 +311,13 @@ enum LightThemeEngine {
             const tokens = {};
             const selFixes = {};   // scoped selector -> ["prop: inverted", ...]
             for (const sheet of document.styleSheets) {
+                // Never scan our OWN output sheet. Its rules are already scoped +
+                // inverted; re-scanning re-scopes them (a new html[...] prefix → a new
+                // unique key every tick), so selFixes — and the emitted <style> — grow
+                // without bound. That made build() re-run and replace the whole stylesheet
+                // every tick (a full recalc/repaint → visible icon flicker, plus a slow
+                // memory leak). Skipping it lets the counts settle and build() go quiet.
+                if (sheet.ownerNode && sheet.ownerNode.id === 'ytm-light-theme') continue;
                 let rules;
                 try { rules = sheet.cssRules; } catch (e) { continue; }
                 if (!rules) continue;
@@ -329,7 +377,7 @@ enum LightThemeEngine {
             // Rebuild when EITHER tokens or per-selector fixes grow. Menus/dialogs load
             // their (dark) CSS lazily on first open — that adds selector rules, not new
             // tokens, so gating on token count alone left those popups un-inverted (black).
-            if (names.length <= knownTokens && selN <= knownSel) return;
+            if (names.length <= knownTokens && selN <= knownSel) return false;
             knownTokens = names.length; knownSel = selN;
 
             // 1. inverted design tokens (cascades through the whole UI). Single colors
@@ -346,7 +394,7 @@ enum LightThemeEngine {
 
             // 2. surfaces painted with literal colors, rerouted through the tokens,
             //    plus the light-mode depth polish.
-            for (const fix of SURFACE_FIXES.concat(ENHANCE, FOCUS)) {
+            for (const fix of SURFACE_FIXES.concat(ENHANCE, RED, FOCUS)) {
                 css += 'html[data-ytm-mode="light"] ' + fix[0] + ' { ' + fix[1].split('; ').map(d => d + ' !important').join('; ') + '; }\n';
             }
 
@@ -361,6 +409,7 @@ enum LightThemeEngine {
                 document.documentElement.appendChild(styleEl);   // append last so we win on equal specificity
             }
             styleEl.textContent = css;
+            return true;   // rebuilt: new styled content arrived (re-arms the audit cadence)
         }
 
         // ---------- WCAG contrast helpers ----------
@@ -422,6 +471,7 @@ enum LightThemeEngine {
         const fixedEls = new Set();
         let degraded = false;
         let auditCount = 0, lowStreak = 0;   // hysteresis so transient load states don't trip #2
+        let stableAudits = 0, auditTick = 0; // adaptive backoff: consecutive clean audits, and a tick counter
 
         const bgFixedEls = new Set();
         const surfFixedEls = new Set();
@@ -498,7 +548,18 @@ enum LightThemeEngine {
                 if (!fg || fg.a === 0) continue;
                 const eb = effectiveBg(el);
                 let bgL = relLum(eb.c);
-                const fgL = relLum(fg);
+                // Composite translucent text over its real background before scoring.
+                // YT's secondary text is translucent white; invert() flips it to a
+                // near-transparent BLACK (alpha-damped), which renders almost invisible
+                // yet would score as solid black if we read the raw rgb — the false-pass
+                // that quietly lost artist names / bylines. Blend so contrast reflects
+                // what's actually on screen, and so the fix below targets a real color.
+                const fgC = fg.a < 1
+                    ? { r: Math.round(fg.r * fg.a + eb.c.r * (1 - fg.a)),
+                        g: Math.round(fg.g * fg.a + eb.c.g * (1 - fg.a)),
+                        b: Math.round(fg.b * fg.a + eb.c.b * (1 - fg.a)) }
+                    : fg;
+                const fgL = relLum(fgC);
                 total++;
                 let r = ratio(fgL, bgL);
                 if (r < AA) {
@@ -520,7 +581,10 @@ enum LightThemeEngine {
                     // surface (a faint grey caption YT set as a literal that survived
                     // inversion) -> clamp it down to AA in place.
                     } else if (bgL > 0.5 && fgL <= bgL && !fixedEls.has(el)) {
-                        const en = enforceLightness(fg, bgL, AA);
+                        // Darken from the COMPOSITED colour (fgC), not the raw rgba — for
+                        // translucent text fgC is the real on-screen grey, so we land on a
+                        // readable mid-grey at AA instead of crushing it to pure black.
+                        const en = enforceLightness(fgC, bgL, AA);
                         if (en && ratio(relLum(en), bgL) > r) {
                             el.style.setProperty('color', 'rgb(' + en.r + ', ' + en.g + ', ' + en.b + ')', 'important');
                             el.setAttribute('data-ytm-fixed', '1');
@@ -556,6 +620,10 @@ enum LightThemeEngine {
                 document.documentElement.setAttribute('data-ytm-mode', 'dark');
                 document.documentElement.setAttribute('data-ytm-degraded', '1');
             }
+            // Adaptive backoff bookkeeping: a meaningful, fully-clean read banks a stable
+            // tick; ANY failure (or an empty page) resets, so we only coast once the page
+            // has genuinely settled at full coverage.
+            if (total > 30) stableAudits = failing === 0 ? stableAudits + 1 : 0;
             return coverage;
         }
 
@@ -570,7 +638,7 @@ enum LightThemeEngine {
         function applyMode() {
             if (degraded) return;
             const light = !systemDark;
-            if (!light) { clearFixes(); restorePins(); }   // leaving light: drop ALL inline fixes
+            if (!light) { clearFixes(); restorePins(); stableAudits = 0; }   // leaving light: drop ALL inline fixes, re-arm audit cadence for re-entry
             document.documentElement.setAttribute('data-ytm-mode', light ? 'light' : 'dark');
         }
 
@@ -610,6 +678,33 @@ enum LightThemeEngine {
                 const c = toRGB(getComputedStyle(el).backgroundColor);
                 if (c && c.a >= 1 && lumOf(c) < 0.5) { el.style.setProperty('background-color', 'rgb(250, 250, 250)', 'important'); menuFixed.add(el); }
             }
+        }
+
+        // The nav-bar wordmark is a single SVG (on_platform_logo_dark.svg) with the red
+        // play button (#f03) AND the word "Music" baked in white — so on a light surface
+        // "Music" disappears, and there's no light asset (the _light variant 404s) and no
+        // way to recolour part of an external <img> with CSS. So we take YT's OWN svg and
+        // recolour ONLY the white wordmark to near-black, leaving #f03 untouched — exactly
+        // what an official light logo would be, zero design change. Fetched + rewritten at
+        // runtime (not hardcoded), so it self-heals if Google updates the asset.
+        let logoUri = null, logoFetching = false, logoOrigSrc = null;
+        function pinLogo() {
+            const img = document.querySelector('ytmusic-logo img.logo');
+            if (!img) return;
+            const light = !degraded && document.documentElement.getAttribute('data-ytm-mode') === 'light';
+            if (!light) { if (logoOrigSrc && img.src.indexOf('data:') === 0) img.src = logoOrigSrc; return; }
+            if (!logoUri) {
+                if (logoFetching) return;
+                if (!logoOrigSrc) logoOrigSrc = img.src;
+                logoFetching = true;
+                // keep #f03 (brand red), darken only the #fff wordmark glyphs
+                fetch(logoOrigSrc).then(r => r.text()).then(svg => {
+                    const lit = svg.replace(/#ffffff/gi, '#0f0f0f').replace(/#fff(?![0-9a-f])/gi, '#0f0f0f');
+                    logoUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(lit);
+                }).catch(() => {}).finally(() => { logoFetching = false; });
+                return;
+            }
+            if (img.src !== logoUri) img.src = logoUri;   // re-assert (YT re-renders the logo across nav)
         }
 
         // The immersive header backdrop (.background-gradient) is given a dark,
@@ -673,7 +768,9 @@ enum LightThemeEngine {
                 selectorFixes: knownSel,
                 textFixes: fixedEls.size,
                 surfaceBorders: surfFixedEls.size,
-                bgFixes: bgFixedEls.size
+                bgFixes: bgFixedEls.size,
+                auditRuns: auditCount,   // how many full audits have run (backoff makes this grow slower once stable)
+                stable: stableAudits     // consecutive clean audits banked toward the backoff threshold
             };
         };
 
@@ -685,17 +782,30 @@ enum LightThemeEngine {
         let surfTick = 0;
         // Run each step independently: a throw in one pin must NOT stop the others
         // (a single try around all of them once let a failing earlier pin silently
-        // skip pinImmersive, so the dark gradient came back).
-        function safe(fn) { try { fn(); } catch (e) { /* isolated; next tick retries */ } }
+        // skip pinImmersive, so the dark gradient came back). Returns the fn's result so
+        // tick() can read build()'s "rebuilt?" signal.
+        function safe(fn) { try { return fn(); } catch (e) { /* isolated; next tick retries */ } }
+        // Adaptive audit backoff: the pins are cheap (a handful of getComputedStyle); the
+        // two audits each walk the whole ~10k-node DOM. Once contrast has been clean for
+        // STABLE_AFTER consecutive audits we stop walking every tick and only re-check
+        // every BACKOFF-th tick — cutting steady-state cost ~BACKOFF×. A build() rebuild
+        // (new lazily-loaded CSS = possibly un-themed content) re-arms full cadence at
+        // once, so late drift is still caught immediately, not BACKOFF ticks later.
+        const STABLE_AFTER = 6, BACKOFF = 6;
         function tick() {
             safe(applyMode);   // re-assert mode each tick so load/refresh stay correct
-            safe(build);
+            const grew = safe(build);
             safe(pinTokens);
             safe(pinNav);
             safe(pinImmersive);
             safe(pinMenu);
-            safe(audit);
-            if (++surfTick % 3 === 0) safe(auditSurfaces);   // throttle the full-DOM surface scan
+            safe(pinLogo);
+            if (grew) stableAudits = 0;   // new styled content arrived → audit at full cadence
+            auditTick++;
+            if (stableAudits < STABLE_AFTER || auditTick % BACKOFF === 0) {
+                safe(audit);
+                if (++surfTick % 3 === 0) safe(auditSurfaces);   // throttle the full-DOM surface scan
+            }
         }
         function schedule() { clearTimeout(pending); pending = setTimeout(tick, 500); }
 

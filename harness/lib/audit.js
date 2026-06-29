@@ -56,10 +56,16 @@ export function auditContrast() {
     if (!vis(st, r)) continue;
     const fg = toRGB(st.color); if (!fg || fg.a === 0) continue;
     const bg = effBg(el);
+    // Composite translucent text over its background — a near-transparent black
+    // (e.g. YT's secondary text after inversion) renders almost invisible but would
+    // score as solid black if we ignored alpha. Score what's actually on screen.
+    const fgC = fg.a < 1
+      ? { r: Math.round(fg.r * fg.a + bg.r * (1 - fg.a)), g: Math.round(fg.g * fg.a + bg.g * (1 - fg.a)), b: Math.round(fg.b * fg.a + bg.b * (1 - fg.a)) }
+      : fg;
     const fs = parseFloat(st.fontSize) || 14;
     const large = fs >= 24 || (fs >= 18.66 && (+st.fontWeight) >= 700);
-    const ratio = wcag(fg, bg);
-    const lc = Math.abs(apca(fg, bg));
+    const ratio = wcag(fgC, bg);
+    const lc = Math.abs(apca(fgC, bg));
     if (ratio < (large ? 3 : 4.5)) {
       failures.push({
         kind: 'text', sel: sel(el),

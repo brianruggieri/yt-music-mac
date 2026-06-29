@@ -50,11 +50,16 @@ export const PROBE = String.raw`
     if (r.width < 8 || r.height < 6 || r.bottom < 0 || r.top > innerHeight) return null;
     var fg = toRGB(st.color); if (!fg || fg.a === 0) return null;
     var bg = effBg(el);
+    // Composite translucent text over its background (alpha-blind scoring let YT's
+    // near-transparent secondary text pass as solid black — see audit.js).
+    var fgC = fg.a < 1
+      ? { r: Math.round(fg.r * fg.a + bg.r * (1 - fg.a)), g: Math.round(fg.g * fg.a + bg.g * (1 - fg.a)), b: Math.round(fg.b * fg.a + bg.b * (1 - fg.a)) }
+      : fg;
     var fs = parseFloat(st.fontSize) || 14;
     var large = fs >= 24 || (fs >= 18.66 && (+st.fontWeight) >= 700);
-    var ratio = wcag(fg, bg);
+    var ratio = wcag(fgC, bg);
     if (ratio < (large ? 3 : 4.5)) {
-      return selOf(el) + ' wcag=' + ratio.toFixed(2) + ' Lc=' + Math.abs(apca(fg, bg)) +
+      return selOf(el) + ' wcag=' + ratio.toFixed(2) + ' Lc=' + Math.abs(apca(fgC, bg)) +
         ' ' + st.color + ' on rgb(' + bg.r + ',' + bg.g + ',' + bg.b + ') "' + el.textContent.trim().slice(0, 28) + '"';
     }
     return null;
