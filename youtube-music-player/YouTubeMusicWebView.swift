@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import WebKit
 
@@ -219,6 +220,93 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                     self.viewModel.notifyTrackChange(title: title, artist: artist, artworkUrl: artworkUrl, isPlaying: isPlaying)
                 }
             }
+        }
+
+        // MARK: - Navigation policy
+        //
+        // Host policy (in evaluation order):
+        //   1. No host (about:blank, data:, file:)  → allow
+        //   2. support.google.com / help.youtube.com → cancel + show import sheet
+        //      (YT Music's "Transfer playlists" link lands here; intercept before the
+        //       google.com allow-entry below would swallow it)
+        //   3. Allowed suffixes (YTM core + Google auth/CDN)  → allow
+        //   4. Everything else  → cancel + open in system browser
+        //
+        // Google auth domains (accounts.google.com etc.) are explicitly allowed so
+        // login keeps working. When in doubt, allow — stranding the user is worse
+        // than leaking one unexpected navigation into the WebView.
+        //
+        // ponytail: permit-list; add entries if new Google auth subdomains appear
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+            // Hostless navigations: only allow about:blank. Reject file:/data:/etc.
+            // so an allowed page or redirect can't render local-file or arbitrary
+            // data content inside this unsandboxed WebView.
+            guard let host = url.host else {
+                if url.scheme == "about" {
+                    decisionHandler(.allow)
+                } else {
+                    decisionHandler(.cancel)
+                }
+                return
+            }
+
+            // Only http/https proceed (and only http/https ever reach NSWorkspace.open
+            // below). Never launch an arbitrary custom-scheme handler app from an
+            // in-webview navigation — real browsers prompt for that; we just refuse.
+            guard url.scheme == "http" || url.scheme == "https" else {
+                decisionHandler(.cancel)
+                return
+            }
+
+            // Transfer-playlists dead-end → import sheet.
+            // support.google.com / help.youtube.com are checked here BEFORE the
+            // google.com allow-entry below would pass them through.
+            // Only the specific "Transfer playlists from other apps" article is
+            // intercepted; we require "transfer" AND a YTM context marker
+            // ("youtubemusic" or "musicpremium") so that unrelated YT Music Premium
+            // help pages (which contain "musicpremium" but no "transfer") fall through
+            // to the system browser instead of opening the importer.
+            // ponytail: heuristic on help-article path — update if Google moves the article
+            if host == "support.google.com" || host == "help.youtube.com" {
+                let raw = url.absoluteString.lowercased()
+                if raw.contains("transfer") && (raw.contains("youtubemusic") || raw.contains("musicpremium")) {
+                    decisionHandler(.cancel)
+                    Task { @MainActor in ImportLauncher.shared.isPresented = true }
+                } else {
+                    NSWorkspace.shared.open(url)
+                    decisionHandler(.cancel)
+                }
+                return
+            }
+
+            let allowedSuffixes = [
+                "music.youtube.com",
+                "youtube.com",
+                "googlevideo.com",
+                "google.com",           // bare google.com + www/myaccount for OAuth redirect chain
+                "accounts.google.com",
+                "googleapis.com",
+                "gstatic.com",
+                "googleusercontent.com",
+                "ggpht.com",
+                "ytimg.com",
+            ]
+            for suffix in allowedSuffixes where host == suffix || host.hasSuffix(".\(suffix)") {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Genuine off-site link → system browser
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
         }
     }
 }

@@ -5,4 +5,5 @@
 
 enum Secrets {
     static let discordClientId = "YOUR_DISCORD_CLIENT_ID"
+    static let spotifyClientID = "YOUR_SPOTIFY_CLIENT_ID"
 }
