@@ -256,10 +256,12 @@ private struct ReviewRow: View {
 					.onSubmit {
 						guard !searchText.isEmpty else { return }
 						let query = searchText
+						let trackID = result.track.id  // capture before await — binding may go stale on reset
 						Task {
 							isYTMSearching = true
 							let hits = await coordinator.search(query)
-							result.candidates = hits
+							// Update by id, not the (possibly stale) $result binding.
+							coordinator.setReviewCandidates(trackID: trackID, candidates: hits)
 							searchText = ""
 							isYTMSearching = false
 						}

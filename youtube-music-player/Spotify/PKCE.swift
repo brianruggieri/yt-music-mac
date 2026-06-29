@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Security  // SecRandomCopyBytes / kSecRandomDefault / errSecSuccess
 
 /// RFC 7636 PKCE helpers — pure functions, no app state.
 enum PKCE {

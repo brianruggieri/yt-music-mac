@@ -1,4 +1,5 @@
 import Foundation
+import Combine  // ObservableObject / @Published — import explicitly, don't rely on whole-module leakage
 
 // ponytail: singleton trigger — menu command, nav interceptor, and ContentView all share this one publisher
 final class ImportLauncher: ObservableObject {

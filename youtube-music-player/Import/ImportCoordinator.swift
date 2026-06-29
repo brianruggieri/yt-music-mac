@@ -102,6 +102,14 @@ final class ImportCoordinator: ObservableObject {
         resolvedReviewIDs.insert(trackID)
     }
 
+    /// Replace a review row's candidates by track id (used by manual YTM search).
+    /// Looks the row up by id rather than writing through a possibly-stale array
+    /// binding — a no-op if the sheet was reset mid-search and the row is gone.
+    func setReviewCandidates(trackID: String, candidates: [YTMCandidate]) {
+        guard let idx = needsReview.firstIndex(where: { $0.track.id == trackID }) else { return }
+        needsReview[idx].candidates = candidates
+    }
+
     /// Opens Spotify OAuth. Moves to .pickSources on success.
     func connectSpotify() async {
         errorMessage = nil
