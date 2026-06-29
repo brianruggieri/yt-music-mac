@@ -16,9 +16,11 @@ final class SpotifyClient {
 		var results: [SpotifyPlaylist] = []
 		while let current = url {
 			let page: PlaylistPage = try await get(url: current)
-			results += page.items.compactMap(\.value).map {
-				SpotifyPlaylist(id: $0.id, name: $0.name, trackCount: $0.trackCount)
-			}
+			results += page.items.compactMap(\.value)
+				// Exclude Spotify-owned editorial/algorithmic playlists: Dev-Mode apps
+				// can't read their items (403), so they'd only fail at import time.
+				.filter { $0.ownerID != "spotify" }
+				.map { SpotifyPlaylist(id: $0.id, name: $0.name, trackCount: $0.trackCount) }
 			url = page.next.flatMap(URL.init)
 		}
 		return results
@@ -116,9 +118,11 @@ private struct PlaylistItem: Decodable {
 	let id: String
 	let name: String
 	let trackCount: Int
+	let ownerID: String?
 
-	private enum CodingKeys: String, CodingKey { case id, name, tracks, items }
+	private enum CodingKeys: String, CodingKey { case id, name, tracks, items, owner }
 	private struct CountObj: Decodable { let total: Int }
+	private struct Owner: Decodable { let id: String? }
 
 	init(from decoder: Decoder) throws {
 		let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -130,6 +134,7 @@ private struct PlaylistItem: Decodable {
 		let count = (try? c.decode(CountObj.self, forKey: .items))
 			?? (try? c.decode(CountObj.self, forKey: .tracks))
 		trackCount = count?.total ?? 0
+		ownerID = (try? c.decode(Owner.self, forKey: .owner))?.id
 	}
 }
 
