@@ -12,18 +12,31 @@ final class SpotifyClient {
 	// MARK: - Public API
 
 	func playlists() async throws -> [SpotifyPlaylist] {
+		// In Spotify Dev Mode only the user's OWN playlists are readable: editorial /
+		// algorithmic (owner "spotify") and other users' followed playlists return 403
+		// on item read. Filter to playlists this user owns so the list only shows
+		// importable ones.
+		let myID = try await currentUserID()
 		var url: URL? = URL(string: "\(SpotifyConfig.apiBase)/me/playlists?limit=50")
 		var results: [SpotifyPlaylist] = []
 		while let current = url {
 			let page: PlaylistPage = try await get(url: current)
 			results += page.items.compactMap(\.value)
-				// Exclude Spotify-owned editorial/algorithmic playlists: Dev-Mode apps
-				// can't read their items (403), so they'd only fail at import time.
-				.filter { $0.ownerID != "spotify" }
+				.filter { $0.ownerID == myID }
 				.map { SpotifyPlaylist(id: $0.id, name: $0.name, trackCount: $0.trackCount) }
 			url = page.next.flatMap(URL.init)
 		}
 		return results
+	}
+
+	/// The current user's Spotify ID (cached) — used to keep only own playlists.
+	private var cachedUserID: String?
+	private func currentUserID() async throws -> String {
+		if let id = cachedUserID { return id }
+		struct Me: Decodable { let id: String }
+		let me: Me = try await get(url: URL(string: "\(SpotifyConfig.apiBase)/me")!)
+		cachedUserID = me.id
+		return me.id
 	}
 
 	func tracks(playlistID: String) async throws -> [SpotifyTrack] {

@@ -105,6 +105,9 @@ struct DoneView: View {
 			Divider()
 
 			HStack {
+				Button("Import another") { coordinator.backToSources() }
+					.buttonStyle(.plain)
+					.foregroundStyle(.secondary)
 				Spacer()
 				ImportCTAButton(title: "Done", systemImage: "checkmark", action: onDismiss)
 			}

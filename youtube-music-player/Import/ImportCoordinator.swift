@@ -88,6 +88,14 @@ final class ImportCoordinator: ObservableObject {
         }
     }
 
+    /// Return to source selection from the matching/review/done screens so the user
+    /// can pick a different playlist. Selections are preserved; a re-run resets results.
+    func backToSources() {
+        runGeneration += 1   // supersede any in-flight matching/import task
+        cancelled = true
+        phase = .pickSources
+    }
+
     /// Mark a review row resolved (accepted or skipped) so it's hidden from the list.
     /// The chosen value stays on the MatchResult in `needsReview` for import accounting.
     func markReviewed(_ trackID: String) {

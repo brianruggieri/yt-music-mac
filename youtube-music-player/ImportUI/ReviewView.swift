@@ -60,6 +60,9 @@ struct ReviewView: View {
 			Divider()
 
 			HStack {
+				Button("Back") { coordinator.backToSources() }
+					.buttonStyle(.plain)
+					.foregroundStyle(.secondary)
 				Spacer()
 				ImportCTAButton(
 					title: "Import \(importCount) \(importCount == 1 ? "song" : "songs")",
