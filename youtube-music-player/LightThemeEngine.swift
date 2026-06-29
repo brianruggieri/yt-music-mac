@@ -221,7 +221,7 @@ enum LightThemeEngine {
         const ENHANCE = [
             ['html, body', 'background-color: var(--ytmusic-background)'],
             ['ytmusic-thumbnail-renderer, #thumbnail.ytmusic-thumbnail-renderer',
-                'box-shadow: 0 1px 4px rgba(0,0,0,0.18); border-radius: 8px'],
+                'box-shadow: 0 1px 2px rgba(0,0,0,0.12); border-radius: 8px'],
             ['ytmusic-carousel-shelf-renderer, ytmusic-shelf-renderer',
                 'border-color: rgba(0,0,0,0.08)'],
             // Unselected category chips: defined outlined pills so they read as
