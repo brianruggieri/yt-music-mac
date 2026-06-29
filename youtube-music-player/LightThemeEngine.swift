@@ -788,7 +788,14 @@ enum LightThemeEngine {
         // (new lazily-loaded CSS = possibly un-themed content) re-arms full cadence at
         // once, so late drift is still caught immediately, not BACKOFF ticks later.
         const STABLE_AFTER = 6, BACKOFF = 6;
+        let lastHref = location.href, lastRun = 0;
         function tick() {
+            lastRun = Date.now();
+            // SPA navigation (clicking a playlist/Home/Explore) swaps the page without a
+            // reload. If the audit had backed off on the previous page, the NEW page's
+            // inline/token-coloured secondary text would stay light for several ticks.
+            // Re-arm full cadence on every URL change so each page themes immediately.
+            if (location.href !== lastHref) { lastHref = location.href; stableAudits = 0; }
             safe(applyMode);   // re-assert mode each tick so load/refresh stay correct
             const grew = safe(build);
             safe(pinTokens);
@@ -803,7 +810,18 @@ enum LightThemeEngine {
                 if (++surfTick % 3 === 0) safe(auditSurfaces);   // throttle the full-DOM surface scan
             }
         }
-        function schedule() { clearTimeout(pending); pending = setTimeout(tick, 500); }
+        // THROTTLE, not debounce. YT streams a page's content in over 1-2s as a burst of
+        // mutations; a pure debounce (reset-timer-on-every-mutation) never fires until the
+        // burst pauses, so a freshly-navigated page stays un-themed (light text) the whole
+        // time. Throttling guarantees a tick at least every ~300ms DURING the burst, so new
+        // content is themed as it lands. Steady state is unaffected (mutations are rare and
+        // the backoff still gates the expensive audit).
+        function schedule() {
+            if (pending) return;
+            const since = Date.now() - lastRun;
+            const wait = since >= 300 ? 0 : 300 - since;
+            pending = setTimeout(() => { pending = 0; tick(); }, wait);
+        }
 
         mq.addEventListener('change', () => { systemDark = mq.matches; applyMode(); schedule(); });
 
