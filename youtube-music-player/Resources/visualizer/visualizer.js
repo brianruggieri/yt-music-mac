@@ -571,8 +571,13 @@
                 // Opaque bg hides the YT media behind the overlay; matched to the actual page
                 // background so the 24px padding frame blends seamlessly (off-white in light,
                 // near-black in dark) instead of being a hard white/black block.
+                // z-index 3: sit in the same layer as YT's media stage (ytmusic-player-page is
+                // fixed z-index:2; the video/art live inside it). Above the stage media, but below
+                // the player-bar (4), nav-bar (5), tooltips (1002) and menu/dialog overlays
+                // (iron-overlay-manager, >=1000) — so every YT popup stacks over the visualizer
+                // exactly as it does over the video, instead of being hidden by our opaque bg.
                 _canvasHost.style.cssText =
-                    'position:fixed;z-index:9998;background:' + pageBgColor() + ';pointer-events:auto;' +
+                    'position:fixed;z-index:3;background:' + pageBgColor() + ';pointer-events:auto;' +
                     'padding:24px;box-sizing:border-box;';   // breathing room: canvas insets from stage edges
                 document.body.appendChild(_canvasHost);
                 const r = computeStageRect();
