@@ -821,10 +821,14 @@ enum LightThemeEngine {
         // the live media query then takes over for runtime changes.
         const mq = window.matchMedia('(prefers-color-scheme: dark)');
         let systemDark = (typeof window.__ytmNativeDark === 'boolean') ? window.__ytmNativeDark : mq.matches;
+        // While anything is in element-fullscreen (the visualizer, or YT's own video player),
+        // stand the light engine down so fullscreen content renders in YT's native dark —
+        // otherwise the inverted player chrome bleeds a light bar into the immersive view.
+        let fullscreenActive = false;
         window.__ytmSetSystemDark = function (d) { systemDark = !!d; applyMode(); pinTokens(); pinNav(); };
         function applyMode() {
             if (degraded) return;
-            const light = !systemDark;
+            const light = !systemDark && !fullscreenActive;
             if (!light) { clearFixes(); restorePins(); stableAudits = 0; }   // leaving light: drop ALL inline fixes, re-arm audit cadence for re-entry
             document.documentElement.setAttribute('data-ytm-mode', light ? 'light' : 'dark');
         }
@@ -1033,6 +1037,9 @@ enum LightThemeEngine {
         }
 
         mq.addEventListener('change', () => { systemDark = mq.matches; applyMode(); schedule(); });
+        // Enter/exit fullscreen flips the engine off/on (same re-apply path as a system
+        // appearance change): on exit, applyMode() restores light and schedule() re-themes.
+        document.addEventListener('fullscreenchange', () => { fullscreenActive = !!document.fullscreenElement; applyMode(); schedule(); });
 
         // Start once the document root exists. The app injects at WKWebView document
         // start (where <html> is already present), but other injectors (e.g. the test
