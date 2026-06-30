@@ -56,6 +56,10 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // Enable the JS Fullscreen API (off by default in macOS WKWebView). Lets the
+        // visualizer AND YT Music's own video player do true element fullscreen via
+        // requestFullscreen(), instead of YT's degraded CSS fill-the-viewport fallback.
+        config.preferences.isElementFullscreenEnabled = true
 
         // Inject scrollbar CSS at document start
         // Thumb colors are read from a CSS variable on <html>; the theme observer
