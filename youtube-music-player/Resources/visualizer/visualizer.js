@@ -872,9 +872,16 @@
         _fsBtn = btn;
 
         _fsChangeHandler = function () {
+            const inFs = document.fullscreenElement === _canvasHost;
+            if (_canvasHost) {
+                // In fullscreen: edge-to-edge immersive — drop the breathing-room padding and
+                // use a true black backdrop (no light-theme page bg bleeding into fullscreen).
+                // Inline so it beats the page-bg the host carries from the windowed state.
+                _canvasHost.style.padding = inFs ? '0' : '24px';
+                _canvasHost.style.background = inFs ? '#000' : pageBgColor();
+            }
             applySize();
             if (_fsBtn) {
-                const inFs = !!document.fullscreenElement;
                 _fsBtn.title = inFs ? 'Exit fullscreen' : 'Enter fullscreen';
                 _fsBtn.setAttribute('aria-label', _fsBtn.title);
             }
