@@ -182,6 +182,251 @@ window.__vizScriptLoaded = true;
         }
         _container = null;
     };
+
+    // --- Task 8: Visualizer toggle segment, overlay fallback, and mode lifecycle ---
+    // Segment-detection selectors are best-effort — YT Music's DOM is not inspectable
+    // headlessly. The overlay fallback is the guaranteed path until human QA confirms
+    // which selectors actually match in the live app.
+
+    let _active = false;
+    let _segInjected = false;    // our Visualizer segment is currently in the DOM
+    let _overlayBtn = null;      // fallback overlay button element
+    let _canvasHost = null;      // div we mount the canvas into
+    let _t8FallbackTimer = null; // 5-second timer before injecting overlay fallback
+    let _injectPending = false;  // debounce flag for MutationObserver callbacks
+
+    // Guard: window.webkit?.messageHandlers?.visualizer only present in WKWebView context.
+    function postVizAction(action) {
+        try {
+            if (window.webkit && window.webkit.messageHandlers &&
+                    window.webkit.messageHandlers.visualizer) {
+                window.webkit.messageHandlers.visualizer.postMessage({ action });
+            }
+        } catch (e) {
+            console.warn('MilkViz: postMessage failed', e);
+        }
+    }
+
+    // Best-effort: find the YT Music player stage element.
+    function findStage() {
+        return (
+            document.querySelector('ytmusic-player') ||
+            document.querySelector('#player-container-inner') ||
+            document.querySelector('ytmusic-player-page') ||
+            null
+        );
+    }
+
+    // Best-effort: find the Song/Video segmented control container.
+    // Logs which strategy matched so human QA can confirm or refine selectors.
+    // Returns the parent container element, or null if not found.
+    function findSegmentContainer() {
+        // Strategy 1: ytmusic-segmented-buttons-renderer (most specific known selector).
+        const known = document.querySelector('ytmusic-segmented-buttons-renderer');
+        if (known) {
+            const t = known.textContent || '';
+            if (/\bsong\b/i.test(t) && /\bvideo\b/i.test(t)) {
+                console.log('MilkViz: segment found — ytmusic-segmented-buttons-renderer');
+                return known;
+            }
+        }
+
+        // Strategy 2: [role="tab"] / YT-specific custom element variants.
+        const tabs = Array.from(document.querySelectorAll(
+            '[role="tab"], tp-yt-paper-tab, ytmusic-tab, ytmusic-segmented-button'
+        ));
+        const songTab = tabs.find((el) => /^\s*song\s*$/i.test(el.textContent));
+        if (songTab) {
+            const parent = songTab.parentElement;
+            if (parent) {
+                const sibs = Array.from(parent.children);
+                if (sibs.some((el) => /^\s*video\s*$/i.test(el.textContent))) {
+                    console.log('MilkViz: segment found — role=tab scan, parent:', parent.tagName);
+                    return parent;
+                }
+            }
+        }
+
+        // Strategy 3: broad button/link text scan — last resort.
+        const els = document.querySelectorAll('button, a, [role="button"], [role="tab"]');
+        for (const el of els) {
+            if (/^\s*song\s*$/i.test(el.textContent)) {
+                const p = el.parentElement;
+                if (!p) continue;
+                if (Array.from(p.children).some((c) => /^\s*video\s*$/i.test(c.textContent))) {
+                    console.log('MilkViz: segment found — text scan, parent:', p.tagName);
+                    return p;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // Inject a "Visualizer" 3rd tab into the segment container.
+    // Clones tag + class from a sibling so it inherits YT's light/dark theme.
+    function injectSegment(container) {
+        if (container.querySelector('#milkviz-seg-btn')) return;  // already there
+
+        const siblings = Array.from(container.children);
+        if (siblings.length === 0) return;
+
+        const tmpl = siblings[0];
+        const btn = document.createElement(tmpl.tagName);
+        btn.id = 'milkviz-seg-btn';
+        btn.className = tmpl.className;
+        const role = tmpl.getAttribute('role');
+        if (role) btn.setAttribute('role', role);
+        btn.textContent = 'Visualizer';
+        btn.style.cursor = 'pointer';
+
+        btn.addEventListener('click', () => {
+            if (!_active) {
+                siblings.forEach((sib) => {
+                    sib.removeAttribute('aria-selected');
+                    sib.removeAttribute('selected');
+                    sib.classList.remove('selected', 'iron-selected', 'tab-selected', 'active');
+                });
+                btn.setAttribute('aria-selected', 'true');
+                MilkViz.setActive(true);
+            } else {
+                btn.removeAttribute('aria-selected');
+                MilkViz.setActive(false);
+            }
+        });
+
+        // Clicking Song or Video deactivates the visualizer.
+        // capture:true so we run before YT's own handlers clear the selection.
+        siblings.forEach((sib) => {
+            sib.addEventListener('click', () => {
+                if (_active) {
+                    btn.removeAttribute('aria-selected');
+                    MilkViz.setActive(false);
+                }
+            }, true);
+        });
+
+        container.appendChild(btn);
+        _segInjected = true;
+        console.log('MilkViz: Visualizer segment injected →',
+            container.tagName, container.id || container.className.slice(0, 40));
+    }
+
+    // Inject a floating fallback button when the segment control is absent.
+    function injectOverlayBtn() {
+        if (_overlayBtn) return;
+
+        const btn = document.createElement('button');
+        btn.id = 'milkviz-overlay-btn';
+        btn.textContent = 'Visualizer';
+        // ponytail: inline styles — no external CSS needed; works regardless of YT stylesheet
+        btn.style.cssText =
+            'position:fixed;top:12px;right:16px;z-index:9997;' +
+            'padding:6px 14px;border-radius:16px;border:none;' +
+            'background:rgba(255,255,255,0.15);color:#fff;' +
+            'font-family:sans-serif;font-size:13px;cursor:pointer;' +
+            'backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);';
+
+        btn.addEventListener('click', () => {
+            if (!_active) {
+                btn.textContent = 'Close Visualizer';
+                btn.style.background = 'rgba(200,50,50,0.6)';
+                MilkViz.setActive(true);
+            } else {
+                btn.textContent = 'Visualizer';
+                btn.style.background = 'rgba(255,255,255,0.15)';
+                MilkViz.setActive(false);
+            }
+        });
+
+        document.body.appendChild(btn);
+        _overlayBtn = btn;
+        console.log('MilkViz: overlay fallback button injected (Song/Video segment not found)');
+    }
+
+    // Core mode lifecycle. Idempotent: setActive(true) twice or setActive(false)
+    // when already inactive are both no-ops.
+    MilkViz.setActive = function (on) {
+        if (on === _active) return;
+        _active = on;
+
+        if (on) {
+            if (!_canvasHost) {
+                _canvasHost = document.createElement('div');
+                _canvasHost.id = 'milkviz-canvas-host';
+                const stage = findStage();
+                if (stage) {
+                    // Overlay canvas on top of the player stage.
+                    if (getComputedStyle(stage).position === 'static') {
+                        stage.style.position = 'relative';
+                    }
+                    _canvasHost.style.cssText =
+                        'position:absolute;inset:0;z-index:9998;background:#000;';
+                    stage.appendChild(_canvasHost);
+                    console.log('MilkViz: canvas host overlaid on', stage.tagName);
+                } else {
+                    // ponytail: fixed full-screen fallback when stage not found
+                    _canvasHost.style.cssText =
+                        'position:fixed;inset:0;z-index:9998;background:#000;';
+                    document.body.appendChild(_canvasHost);
+                    console.log('MilkViz: canvas host as fixed overlay (stage not found)');
+                }
+            }
+            MilkViz.mount(_canvasHost);
+            MilkViz.resume();   // mount is async; resume is idempotent — starts loop immediately
+            postVizAction('modeOn');
+        } else {
+            MilkViz.unmount();
+            if (_canvasHost) { _canvasHost.remove(); _canvasHost = null; }
+            MilkViz.pause();    // unmount calls pause, but call again per spec
+            postVizAction('modeOff');
+        }
+    };
+
+    // Debounced segment-injection check. Called by MutationObserver on DOM changes.
+    function scheduleInjectCheck() {
+        if (_injectPending) return;
+        _injectPending = true;
+        setTimeout(() => {
+            _injectPending = false;
+            if (_overlayBtn) return;   // already on fallback path — stop scanning
+            if (document.querySelector('#milkviz-seg-btn')) return;  // segment still in DOM
+            _segInjected = false;
+            const container = findSegmentContainer();
+            if (container) {
+                if (_t8FallbackTimer) { clearTimeout(_t8FallbackTimer); _t8FallbackTimer = null; }
+                injectSegment(container);
+            }
+        }, 200);
+    }
+
+    // Boot the segment observer. Gated entirely on __ytmVizSupported.
+    function startSegObserver() {
+        if (!window.__ytmVizSupported) {
+            console.log('MilkViz: __ytmVizSupported falsy — visualizer toggle disabled');
+            return;
+        }
+
+        // Attempt injection immediately (page may already have the control).
+        scheduleInjectCheck();
+
+        // If segment control not found within 5s, fall back to overlay button.
+        _t8FallbackTimer = setTimeout(() => {
+            _t8FallbackTimer = null;
+            if (!_segInjected) injectOverlayBtn();
+        }, 5000);
+
+        // MutationObserver re-injects after SPA navigation removes our segment.
+        const obs = new MutationObserver(scheduleInjectCheck);
+        obs.observe(document.body, { childList: true, subtree: true });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startSegObserver);
+    } else {
+        startSegObserver();
+    }
+
 })();
 
 // Temporary probe: confirms the script executed in the page's JS context.
