@@ -366,7 +366,11 @@ struct YouTubeMusicWebView: NSViewRepresentable {
             do {
                 try tap.start()
             } catch {
-                webView.evaluateJavaScript("window.MilkViz && window.MilkViz.nativeStatus({state:'error',code:'audioCaptureDenied'})")
+                // A start() throw is a SETUP failure (no WebKit audio child yet, PID-translate
+                // miss, aggregate-device error) — NOT a TCC denial (denial surfaces as silent
+                // capture, not a throw). Report a generic, retryable error so we don't wrongly
+                // send the user to System Settings > Privacy for a non-permission problem.
+                webView.evaluateJavaScript("window.MilkViz && window.MilkViz.nativeStatus({state:'error',code:'audioUnavailable'})")
                 return
             }
             audioTap = tap
@@ -388,7 +392,11 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 // without a per-tick Task allocation (sound: queue is .main).
                 MainActor.assumeIsolated {
                     guard let self, let webView, let tap = self.audioTap else { return }
-                    let pcm = tap.latestWindow(frames: 2048)              // interleaved stereo
+                    // ~1024 stereo frames/tick ≈ the worklet's real-time consumption at this
+                    // 60 Hz cadence (48 kHz / 60 ≈ 800), with modest headroom. Keeps the worklet
+                    // ring fed-but-bounded instead of flooding it with a 2048-frame sliding
+                    // window every 16 ms (~123k frames/s) that just overflows + wastes base64.
+                    let pcm = tap.latestWindow(frames: 1024)              // interleaved stereo
                     guard !pcm.isEmpty else { return }
                     let b64 = pcm.withUnsafeBufferPointer { ptr in
                         Data(bytes: ptr.baseAddress!, count: ptr.count * MemoryLayout<Float>.stride)

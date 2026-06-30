@@ -632,6 +632,10 @@
                 'Audio capture permission needed\n' +
                 'System Settings > Privacy & Security > Audio Capture',
                 true);
+        } else if (s.state === 'error') {
+            // Generic, retryable setup failure (e.g. audioUnavailable) — NOT a permission
+            // problem, so don't point the user at System Settings.
+            showStatusOverlay('Couldn’t start the audio visualizer\nClick Try again', true);
         } else if (s.state === 'ok') {
             clearStatusOverlay();
         }
