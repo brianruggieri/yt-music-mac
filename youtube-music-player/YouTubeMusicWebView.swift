@@ -266,27 +266,27 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                                     injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         config.userContentController.addUserScript(vizProbe)
 
-        // ===== TEMPORARY Spike B (remove in Task 12) =====
-        // Injects Butterchurn + feed harness to verify AudioWorklet->Butterchurn wiring.
-        // Files are read from the app bundle at runtime so they are not inlined here.
+        // Bootstrap loader: read each visualizer asset from the bundle and inject as a
+        // WKUserScript (document-end, main frame). Mechanism proven by Spike B — string
+        // injection is not gated by CSP script-src; blob-worklet loading wired in Task 6.
         let loadJS: (String, String?) -> String? = { name, subdir in
             (Bundle.main.url(forResource: name, withExtension: "js", subdirectory: subdir)
                 ?? Bundle.main.url(forResource: name, withExtension: "js", subdirectory: "Resources/" + (subdir ?? ""))
                 ?? Bundle.main.url(forResource: name, withExtension: "js"))
                 .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
         }
-        let spikeScripts: [(String, String?)] = [
-            ("butterchurn.min", "visualizer"),
+        let vizScripts: [(String, String?)] = [
+            ("butterchurn.min",        "visualizer"),
             ("butterchurnPresets.min", "visualizer"),
-            ("feed-spike", nil)
+            ("preset-list",            "visualizer"),
+            ("visualizer",             "visualizer"),
         ]
-        for (name, subdir) in spikeScripts {
+        for (name, subdir) in vizScripts {
             if let src = loadJS(name, subdir) {
                 config.userContentController.addUserScript(
                     WKUserScript(source: src, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
             }
         }
-        // ===== END Spike B =====
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
