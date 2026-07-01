@@ -190,8 +190,16 @@ enum LightThemeEngine {
             // class so we out-specify the inverted `.song-button.ytmusic-av-toggle` grey rule.
             // The earlier fix painted track AND both buttons one flat grey, which is exactly
             // why neither side read as selected.
-            ['.av-toggle', 'background-color: var(--ytmusic-color-black1)'],
-            ['ytmusic-av-toggle[playback-mode="ATV_PREFERRED"] .song-button.ytmusic-av-toggle, ytmusic-av-toggle[playback-mode="OMV_PREFERRED"] .video-button.ytmusic-av-toggle',
+            // OWNERSHIP BOUNDARY: once the visualizer injects its 3rd button it adds
+            // `.milkviz-styled` to .av-toggle and fully owns the control's look + selection
+            // (track, buttons, the selected pill via its own .milkviz-sel class) in BOTH
+            // themes. These engine rules paint selection off YT's `playback-mode`, which the
+            // overlay never changes — so without the :not() guard the two systems fight (Video
+            // stays "selected" next to the Visualizer, and we'd need counter-observers). Gate
+            // them off the milkviz-owned toggle; they still theme the plain 2-button control
+            // before injection / when the visualizer is unsupported.
+            ['.av-toggle:not(.milkviz-styled)', 'background-color: var(--ytmusic-color-black1)'],
+            ['ytmusic-av-toggle[playback-mode="ATV_PREFERRED"] .av-toggle:not(.milkviz-styled) .song-button.ytmusic-av-toggle, ytmusic-av-toggle[playback-mode="OMV_PREFERRED"] .av-toggle:not(.milkviz-styled) .video-button.ytmusic-av-toggle',
                 'background-color: rgb(255, 255, 255); box-shadow: 0 1px 2px rgba(0,0,0,0.2)'],
             // Modal scrim (tp-yt-iron-overlay-backdrop — the dimming layer behind every
             // dialog: edit-playlist, add-to-playlist, etc.). YT colours it from an inverted
@@ -332,13 +340,33 @@ enum LightThemeEngine {
             // inline !important, so only the inheriting separators change.
             ['ytmusic-responsive-list-item-renderer .secondary-flex-columns .flex-column::before',
                 'color: rgb(82,82,82)'],
-            ['ytmusic-responsive-header-renderer .subtitle, ytmusic-responsive-header-renderer .second-subtitle, ytmusic-responsive-list-item-renderer yt-formatted-string.complex-string',
+            // Same byline-separator damping shows on Home/Explore carousel cards
+            // (ytmusic-two-row-item-renderer) and card shelves — their subtitle "•"/"&"
+            // glyphs inherit the same translucent token while the artist text spans get
+            // rescued. The original rule only reached list-item rows, so card bylines kept
+            // the faded separators; extend the same recolour to the card subtitle parents.
+            ['ytmusic-responsive-header-renderer .subtitle, ytmusic-responsive-header-renderer .second-subtitle, ytmusic-responsive-list-item-renderer yt-formatted-string.complex-string, ytmusic-two-row-item-renderer yt-formatted-string.subtitle, ytmusic-card-shelf-renderer yt-formatted-string.subtitle',
+                'color: rgb(82,82,82)'],
+            // Now-playing bar byline ("Artist • Album • Year"): same damped "•" separators.
+            // The artist/album are links carrying their own colour, so recolouring the byline
+            // parent only catches the inheriting separator glyphs — not the red title (a
+            // separate .title element) above it.
+            ['.content-info-wrapper.ytmusic-player-bar yt-formatted-string.byline.ytmusic-player-bar',
                 'color: rgb(82,82,82)'],
             // Multi-select checkboxes (#14): same damped ~8% token on the hollow-square svg;
             // the icon-rescue skips it (fill alpha < 0.4 gate). Give the outline a visible
             // weight, and a near-black filled box when checked.
             ['yt-checkbox-renderer, yt-checkbox-renderer yt-icon, yt-checkbox-renderer svg',
                 'color: rgba(0,0,0,0.55); fill: rgba(0,0,0,0.55)'],
+            // "Video not available" (and sibling) snackbars: yt-notification-action-renderer
+            // has no light-mode surface of its own, so the token inversion left it an all-black
+            // box with invisible text in the bottom-left. Snackbars stay DARK by convention
+            // (like the modal scrim), so pin a readable dark pill with white text rather than
+            // inverting it to light. Scope text white so the contrast audit leaves it alone.
+            ['yt-notification-action-renderer, ytmusic-notification-action-renderer',
+                'background-color: rgb(32,33,36); border-radius: 8px'],
+            ['yt-notification-action-renderer yt-formatted-string, ytmusic-notification-action-renderer yt-formatted-string, yt-notification-action-renderer #text, yt-notification-action-renderer #sub-text',
+                'color: rgb(255,255,255)'],
             ['yt-checkbox-renderer[aria-checked="true"] yt-icon, yt-checkbox-renderer[aria-checked="true"] svg',
                 'color: rgb(13,13,13); fill: rgb(13,13,13)'],
         ];
@@ -415,7 +443,9 @@ enum LightThemeEngine {
 
         // Prefix each comma-separated part of a selector with our mode scope,
         // respecting parens so :is()/:where() lists aren't split mid-group.
-        function scope(sel) {
+        // Split a selector list on TOP-LEVEL commas only (parens preserved so :is()/:where()
+        // groups aren't split mid-list). Shared by scope() and the av-toggle ownership filter.
+        function splitSelectorParts(sel) {
             const parts = []; let depth = 0, cur = '';
             for (const ch of sel) {
                 if (ch === '(') depth++;
@@ -423,7 +453,10 @@ enum LightThemeEngine {
                 if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; } else cur += ch;
             }
             if (cur.trim()) parts.push(cur);
-            return parts.map(p => {
+            return parts;
+        }
+        function scope(sel) {
+            return splitSelectorParts(sel).map(p => {
                 p = p.trim();
                 // A part rooted at <html> (e.g. "html", "html, body") must MERGE the mode
                 // attribute onto html, not become a descendant of it (html has no html
@@ -507,7 +540,18 @@ enum LightThemeEngine {
                         }
                     }
                     if (decls.length) {
-                        const k = scope(rule.selectorText);
+                        // OWNERSHIP BOUNDARY: the Song/Video/Visualizer toggle is fully owned by
+                        // the visualizer once injected, so don't invert YT's av-toggle highlight
+                        // literals — its selected-segment fill is rgba(255,255,255,.1), which this
+                        // scanner would flip to a dark pill and re-emit scoped+!important at (0,4,2),
+                        // painting whatever YT marks selected (playback-mode stays on Song/Video even
+                        // while the overlay is active) and fighting the visualizer's own .milkviz-sel.
+                        // Drop only the av-toggle PARTS so unrelated selectors grouped in the same
+                        // rule still get their inversion emitted.
+                        const kept = splitSelectorParts(rule.selectorText)
+                            .filter(function (p) { return !/av-toggle|song-button|video-button/.test(p); });
+                        if (!kept.length) continue;
+                        const k = scope(kept.join(','));
                         selFixes[k] = (selFixes[k] || []).concat(decls);
                     }
                 }
@@ -667,6 +711,11 @@ enum LightThemeEngine {
                 // Skip ripple/feedback/overlay fills — they're decorative layers inside
                 // a control, not the control's own surface.
                 if (/TouchFeedback|ripple|overlay|-overlay/i.test(cls)) continue;
+                // The Song/Video/Visualizer toggle is owned by the visualizer once injected;
+                // it styles its own track/buttons in both themes. The auto-border audit used
+                // to stamp inline hairlines on its pill buttons, which the visualizer then had
+                // to chase with a counter-observer — skip the whole control here instead.
+                if (el.closest('ytmusic-av-toggle')) continue;
                 const st = getComputedStyle(el);
                 if (st.position === 'absolute' || st.position === 'fixed') continue;   // overlays, not surfaces
                 if ((parseFloat(st.borderTopLeftRadius) || 0) < 4) continue;     // not card-like
@@ -695,6 +744,7 @@ enum LightThemeEngine {
             if (degraded || document.documentElement.getAttribute('data-ytm-mode') !== 'light') return 1;
             let total = 0, failing = 0;
             for (const el of collectText(document.body, [])) {
+                if (el.closest('ytmusic-av-toggle')) continue;   // visualizer-owned control; engine stands down (see scan())
                 const st = getComputedStyle(el);
                 if (st.visibility === 'hidden' || st.opacity === '0') continue;
                 const rect = el.getBoundingClientRect();
@@ -821,10 +871,14 @@ enum LightThemeEngine {
         // the live media query then takes over for runtime changes.
         const mq = window.matchMedia('(prefers-color-scheme: dark)');
         let systemDark = (typeof window.__ytmNativeDark === 'boolean') ? window.__ytmNativeDark : mq.matches;
+        // While anything is in element-fullscreen (the visualizer, or YT's own video player),
+        // stand the light engine down so fullscreen content renders in YT's native dark —
+        // otherwise the inverted player chrome bleeds a light bar into the immersive view.
+        let fullscreenActive = false;
         window.__ytmSetSystemDark = function (d) { systemDark = !!d; applyMode(); pinTokens(); pinNav(); };
         function applyMode() {
             if (degraded) return;
-            const light = !systemDark;
+            const light = !systemDark && !fullscreenActive;
             if (!light) { clearFixes(); restorePins(); stableAudits = 0; }   // leaving light: drop ALL inline fixes, re-arm audit cadence for re-entry
             document.documentElement.setAttribute('data-ytm-mode', light ? 'light' : 'dark');
         }
@@ -1033,6 +1087,9 @@ enum LightThemeEngine {
         }
 
         mq.addEventListener('change', () => { systemDark = mq.matches; applyMode(); schedule(); });
+        // Enter/exit fullscreen flips the engine off/on (same re-apply path as a system
+        // appearance change): on exit, applyMode() restores light and schedule() re-themes.
+        document.addEventListener('fullscreenchange', () => { fullscreenActive = !!document.fullscreenElement; applyMode(); schedule(); });
 
         // Start once the document root exists. The app injects at WKWebView document
         // start (where <html> is already present), but other injectors (e.g. the test

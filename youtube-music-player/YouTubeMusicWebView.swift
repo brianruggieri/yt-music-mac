@@ -96,6 +96,10 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // Enable the JS Fullscreen API (off by default in macOS WKWebView). Lets the
+        // visualizer AND YT Music's own video player do true element fullscreen via
+        // requestFullscreen(), instead of YT's degraded CSS fill-the-viewport fallback.
+        config.preferences.isElementFullscreenEnabled = true
 
         // Inject scrollbar CSS at document start
         // Thumb colors are read from a CSS variable on <html>; the light-theme engine
@@ -294,6 +298,49 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         let lightScript = WKUserScript(source: LightThemeEngine.script, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         config.userContentController.addUserScript(lightScript)
 
+        // Visualizer capability flag (document start, mirrors the __ytmNativeDark seed):
+        // tells the page whether native audio capture (macOS 14.4+ process tap) is
+        // available before it decides to offer the visualizer.
+        let vizSeed = WKUserScript(source: "window.__ytmVizSupported = \(AudioTap.isSupported ? "true" : "false");",
+                                   injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        config.userContentController.addUserScript(vizSeed)
+
+        // JS->native visualizer control: { action: "modeOn" | "modeOff" }.
+        config.userContentController.add(context.coordinator, name: "visualizer")
+
+        // Bootstrap loader: read each visualizer asset from the bundle and inject as a
+        // WKUserScript (document-end, main frame). Mechanism proven by Spike B — string
+        // injection is not gated by CSP script-src; blob-worklet loading wired in Task 6.
+        let loadJS: (String, String?) -> String? = { name, subdir in
+            (Bundle.main.url(forResource: name, withExtension: "js", subdirectory: subdir)
+                ?? Bundle.main.url(forResource: name, withExtension: "js", subdirectory: "Resources/" + (subdir ?? ""))
+                ?? Bundle.main.url(forResource: name, withExtension: "js"))
+                .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        }
+        // Worklet source for visualizer.js. A worklet must load into the
+        // AudioWorklet context (not the page), so we hand its source over as a
+        // string and let visualizer.js build a blob: module from it. base64 +
+        // atob keeps the injected literal free of quotes/newlines; JS source is
+        // ASCII so it round-trips cleanly. Registered BEFORE visualizer.js below.
+        if let workletSrc = loadJS("pcm-worklet", "visualizer") {
+            let b64 = Data(workletSrc.utf8).base64EncodedString()
+            config.userContentController.addUserScript(
+                WKUserScript(source: "window.__pcmWorkletSource = atob('\(b64)');",
+                             injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        }
+
+        let vizScripts: [(String, String?)] = [
+            ("butterchurn.min",        "visualizer"),
+            ("butterchurnPresets.min", "visualizer"),
+            ("preset-list",            "visualizer"),
+            ("visualizer",             "visualizer"),
+        ]
+        for (name, subdir) in vizScripts {
+            if let src = loadJS(name, subdir) {
+                config.userContentController.addUserScript(
+                    WKUserScript(source: src, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+            }
+        }
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -303,9 +350,16 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         webView.uiDelegate = context.coordinator
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         webView.setValue(false, forKey: "drawsBackground")
+        // Debug-only: lets Safari's Develop menu attach to the WKWebView for DOM inspection.
+        // Never enabled in Release so shipped builds aren't remotely inspectable.
+        #if DEBUG
+        if #available(macOS 13.3, *) { webView.isInspectable = true }
+        #endif
         webView.appearance = mode.appearance   // force light/dark; nil = follow system
 
         viewModel.webView = webView
+        context.coordinator.webView = webView
+        context.coordinator.installLifecycleObservers()
 
         if let url = URL(string: "https://music.youtube.com") {
             webView.load(URLRequest(url: url))
@@ -316,15 +370,159 @@ struct YouTubeMusicWebView: NSViewRepresentable {
 
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 
+    // Tear the feed down with the view: cancel the timer, stop the tap, and drop the
+    // visualizer message handler so a discarded WebView can't leave a 60 Hz tap running.
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        coordinator.stopVisualizerFeed()
+        coordinator.removeLifecycleObservers()
+        nsView.configuration.userContentController.removeScriptMessageHandler(forName: "visualizer")
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(viewModel: viewModel)
     }
 
     class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
         var viewModel: YouTubeMusicViewModel
+        weak var webView: WKWebView?
+
+        // Visualizer feed state. Both owned on the MainActor; the feed timer fires
+        // on the main queue and bridges to them via MainActor.assumeIsolated.
+        private var audioTap: AudioTap?
+        private var feedTimer: DispatchSourceTimer?
+
+        // Lifecycle gates for the 60 Hz feed. The TAP stays alive while mode is on;
+        // only the timer is started/stopped as these flip, so a backgrounded or
+        // paused visualizer does no per-frame work. updateCapture() recomputes
+        // the single "should the timer run" condition rather than pause/resume the
+        // DispatchSource directly (which would risk a suspend/resume imbalance crash).
+        private var modeActive = false
+        private var appActive = true
+        private var windowMiniaturized = false
+        private var trackPlaying = true
+
+        // Tokens for the 4 AppKit lifecycle observers; removed in dismantleNSView.
+        private var lifecycleObservers: [NSObjectProtocol] = []
 
         init(viewModel: YouTubeMusicViewModel) {
             self.viewModel = viewModel
+            super.init()
+        }
+
+        // MARK: - Visualizer feed
+
+        /// Start (or no-op if already running) the visualizer feed. Creates the tap,
+        /// marks mode active, and lets updateCapture() decide whether the 60 Hz timer
+        /// should actually run. Idempotent: a second modeOn while running returns early
+        /// so we never stack a second tap.
+        @MainActor func startVisualizerFeed(_ webView: WKWebView) {
+            modeActive = true        // user intent; updateCapture starts the tap iff gates are open
+            updateCapture()
+        }
+
+        /// Build (but do not resume) the ~60 Hz timer that pushes base64 stereo Float32
+        /// PCM into the page via window.__milkFeed. Factored out so updateCapture can
+        /// recreate it on resume without duplicating the event handler.
+        @MainActor private func makeFeedTimer(_ webView: WKWebView) -> DispatchSourceTimer {
+            let t = DispatchSource.makeTimerSource(queue: .main)
+            t.schedule(deadline: .now(), repeating: .milliseconds(16))   // ~60 Hz
+            t.setEventHandler { [weak self, weak webView] in
+                // The timer fires on the main queue, so we are really on the MainActor.
+                // assumeIsolated bridges this nonisolated @Sendable handler to the
+                // MainActor-isolated audioTap and the MainActor evaluateJavaScript call
+                // without a per-tick Task allocation (sound: queue is .main).
+                MainActor.assumeIsolated {
+                    guard let self, let webView, let tap = self.audioTap else { return }
+                    // Drain ONLY the frames captured since the last tick (non-overlapping), so
+                    // we feed the worklet ~real-time audio instead of a sliding window that
+                    // floods + overflows its ring. Cap protects against a stalled tick; normal
+                    // ticks yield ~800 frames (48 kHz / 60). Empty => nothing new, skip.
+                    let pcm = tap.drainNew(maxFrames: 4096)               // interleaved stereo, fresh only
+                    guard !pcm.isEmpty else { return }
+                    let b64 = pcm.withUnsafeBufferPointer { ptr in
+                        Data(bytes: ptr.baseAddress!, count: ptr.count * MemoryLayout<Float>.stride)
+                            .base64EncodedString()
+                    }
+                    webView.evaluateJavaScript("window.__milkFeed && window.__milkFeed('\(b64)')")
+                }
+            }
+            return t
+        }
+
+        /// Single source of truth for capture. The tap AND the 60Hz feed should run iff
+        /// mode is on, the app is active, the window isn't miniaturized, and the track is
+        /// playing. Starts the tap (and emits nativeStatus) + timer when they should run and
+        /// are absent; STOPS the tap + timer when they shouldn't. So capture genuinely pauses
+        /// on app-resign / miniaturize / track-pause (plan Global Constraint: "tap + render
+        /// run only while active") — not just the feed — and "Try again" (modeOff->modeOn)
+        /// can recreate a silent/denied tap.
+        @MainActor private func updateCapture() {
+            let shouldCapture = modeActive && appActive && !windowMiniaturized && trackPlaying
+            guard let webView else { return }
+            if shouldCapture {
+                if audioTap == nil {
+                    let tap = AudioTap()
+                    do {
+                        try tap.start()
+                    } catch {
+                        // A start() throw is a SETUP failure (no WebKit audio child yet,
+                        // PID-translate miss, aggregate-device error) — NOT a TCC denial
+                        // (denial surfaces as silent capture, not a throw). Report a generic,
+                        // retryable error rather than wrongly sending the user to System
+                        // Settings > Privacy for a non-permission problem.
+                        webView.evaluateJavaScript("window.MilkViz && window.MilkViz.nativeStatus({state:'error',code:'audioUnavailable'})")
+                        return
+                    }
+                    audioTap = tap
+                    webView.evaluateJavaScript("window.MilkViz && window.MilkViz.nativeStatus({state:'ok'})")
+                }
+                if feedTimer == nil {
+                    let t = makeFeedTimer(webView)
+                    feedTimer = t
+                    t.resume()
+                    // Resume the page's rAF render loop too (it was paused when last gated off).
+                    webView.evaluateJavaScript("window.MilkViz && window.MilkViz.resume()")
+                }
+            } else {
+                let wasRunning = feedTimer != nil || audioTap != nil
+                feedTimer?.cancel(); feedTimer = nil
+                audioTap?.stop(); audioTap = nil
+                // Stop the page's rAF render loop so a backgrounded/minimized/paused visualizer
+                // does no per-frame work (the native tap+timer are already stopped above).
+                if wasRunning { webView.evaluateJavaScript("window.MilkViz && window.MilkViz.pause()") }
+            }
+        }
+
+        @MainActor func stopVisualizerFeed() {
+            modeActive = false
+            updateCapture()          // gates closed by modeActive=false -> stops tap + timer
+        }
+
+        /// Register the 4 AppKit lifecycle observers + the track play/pause observer.
+        /// Each flips a gate and recomputes the feed timer. Called from makeNSView
+        /// (MainActor). Notifications deliver on .main, so assumeIsolated is sound.
+        @MainActor func installLifecycleObservers() {
+            let nc = NotificationCenter.default
+            func observe(_ name: Notification.Name, _ apply: @escaping @MainActor (Coordinator) -> Void) -> NSObjectProtocol {
+                nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { guard let self else { return }; apply(self); self.updateCapture() }
+                }
+            }
+            lifecycleObservers = [
+                observe(NSApplication.didResignActiveNotification)   { $0.appActive = false },
+                observe(NSApplication.didBecomeActiveNotification)   { $0.appActive = true },
+                observe(NSWindow.didMiniaturizeNotification)         { $0.windowMiniaturized = true },
+                observe(NSWindow.didDeminiaturizeNotification)       { $0.windowMiniaturized = false },
+            ]
+            // Track play/pause gates the feed too — paused audio is silence not worth feeding.
+            viewModel.addTrackChangeObserver { [weak self] _, _, _, isPlaying in
+                MainActor.assumeIsolated { guard let self else { return }; self.trackPlaying = isPlaying; self.updateCapture() }
+            }
+        }
+
+        @MainActor func removeLifecycleObservers() {
+            for token in lifecycleObservers { NotificationCenter.default.removeObserver(token) }
+            lifecycleObservers = []
         }
 
         // MARK: - File uploads
@@ -399,6 +597,31 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 Task { @MainActor in
                     self.viewModel.headerColor = color
                 }
+            } else if message.name == "visualizer",
+                      let body = message.body as? [String: Any],
+                      let action = body["action"] as? String {
+                // Only honor capture commands from a real YT Music page. This handler is
+                // registered for EVERY page in the WebView, so without validating the sender
+                // an allowed remote page (the accounts.google.com sign-in flow, youtube.com,
+                // etc.) could post modeOn and start the native audio tap. Gate on the frame's
+                // own security origin (trusted, not page-supplied body data).
+                let host = message.frameInfo.securityOrigin.host
+                guard host == "music.youtube.com" || host.hasSuffix(".music.youtube.com") else { return }
+                // Hop to the MainActor (this handler is nonisolated) before touching
+                // the MainActor-isolated feed lifecycle.
+                Task { @MainActor in
+                    switch action {
+                    case "modeOn":  if let wv = self.webView { self.startVisualizerFeed(wv) }
+                    case "modeOff": self.stopVisualizerFeed()
+                    case "enterFullscreen":
+                        // A real user gesture makes WebKit reject the visualizer's element
+                        // requestFullscreen (TypeError). Re-issuing it from here via
+                        // evaluateJavaScript runs it WITHOUT transient activation, which WebKit
+                        // accepts — so the click bounces through native to actually go fullscreen.
+                        self.webView?.evaluateJavaScript("window.MilkViz && MilkViz.enterFullscreen && MilkViz.enterFullscreen()")
+                    default:        break
+                    }
+                }
             }
         }
 
@@ -416,6 +639,18 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         // login keeps working. When in doubt, allow — stranding the user is worse
         // than leaking one unexpected navigation into the WebView.
         //
+        // A full-page navigation (reload of music.youtube.com, or an allowed cross-origin
+        // nav like the sign-in flow) destroys the page that owns the visualizer WITHOUT it
+        // getting to post modeOff. Tear down the tap + 60Hz feed here so capture and the
+        // evaluateJavaScript loop don't keep running against the new/destroyed page. SPA
+        // route changes within YT Music don't fire this, so the active visualizer survives
+        // normal in-app navigation. Delivered on the main thread (assumeIsolated is sound).
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            MainActor.assumeIsolated {
+                if modeActive { stopVisualizerFeed() }
+            }
+        }
+
         // ponytail: permit-list; add entries if new Google auth subdomains appear
         func webView(
             _ webView: WKWebView,
@@ -490,3 +725,4 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         }
     }
 }
+

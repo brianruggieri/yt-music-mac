@@ -8,7 +8,18 @@
 
 /* Begin PBXFileReference section */
 		B9A226BE2EDDF13E002E5F67 /* YouTube Music.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "YouTube Music.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		/* Spike B resources — remove in Task 12 */
+		B9B001002EDDF001002E5F67 /* butterchurn.min.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "butterchurn.min.js"; path = "youtube-music-player/Resources/visualizer/butterchurn.min.js"; sourceTree = SOURCE_ROOT; };
+		B9B002002EDDF002002E5F67 /* butterchurnPresets.min.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = "butterchurnPresets.min.js"; path = "youtube-music-player/Resources/visualizer/butterchurnPresets.min.js"; sourceTree = SOURCE_ROOT; };
+		B9B004002EDDF004002E5F67 /* VERSIONS.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = "VERSIONS.txt"; path = "youtube-music-player/Resources/visualizer/VERSIONS.txt"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXBuildFile section */
+		/* Spike B resources — remove in Task 12 */
+		B9B001012EDDF001012E5F67 /* butterchurn.min.js in Resources */ = {isa = PBXBuildFile; fileRef = B9B001002EDDF001002E5F67 /* butterchurn.min.js */; };
+		B9B002012EDDF002012E5F67 /* butterchurnPresets.min.js in Resources */ = {isa = PBXBuildFile; fileRef = B9B002002EDDF002002E5F67 /* butterchurnPresets.min.js */; };
+		B9B004012EDDF004012E5F67 /* VERSIONS.txt in Resources */ = {isa = PBXBuildFile; fileRef = B9B004002EDDF004002E5F67 /* VERSIONS.txt */; };
+/* End PBXBuildFile section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B9A226C02EDDF13E002E5F67 /* youtube-music-player */ = {
@@ -109,6 +120,10 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				/* Spike B resources — remove in Task 12 */
+				B9B001012EDDF001012E5F67 /* butterchurn.min.js in Resources */,
+				B9B002012EDDF002012E5F67 /* butterchurnPresets.min.js in Resources */,
+				B9B004012EDDF004012E5F67 /* VERSIONS.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -256,6 +271,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "youtube-music-player/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "YouTube Music";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -290,6 +306,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "youtube-music-player/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "YouTube Music";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";

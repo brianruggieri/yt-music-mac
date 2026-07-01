@@ -15,6 +15,7 @@ A lightweight native macOS wrapper for YouTube Music with system integration.
 - **Spotify import** — Connect a Spotify account to match and import your playlists and liked songs into YouTube Music
 - **Frameless design** — Clean, minimal window that blends with YouTube Music's UI
 - **Native scrollbars** — macOS-style scrollbars for a consistent look
+- **Visualizer** — a third "Visualizer" option on YT Music's Song/Video toggle renders an audio-reactive Butterchurn (MilkDrop) visualization driven by a native Core Audio process tap of the app's own audio; requires macOS 14.4+ (hidden otherwise) and Audio Capture permission (prompted on first use)
 
 ## Screenshots
 
