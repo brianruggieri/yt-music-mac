@@ -353,6 +353,20 @@ enum LightThemeEngine {
             // separate .title element) above it.
             ['.content-info-wrapper.ytmusic-player-bar yt-formatted-string.byline.ytmusic-player-bar',
                 'color: rgb(82,82,82)'],
+            // Byline LINKS: the rule above recolours the byline parent (separators + the
+            // inheriting "• views • likes" runs), but the artist/album <a> links carry their
+            // own translucent token. The runtime rescue darkens them once then caches them,
+            // and YT REUSES the node on track change while wiping our inline colour — the cache
+            // guard (fixedEls) then skips them forever, so the artist reverts to washed-out
+            // grey on the next song. Pin the links so they re-apply on every re-render.
+            ['.content-info-wrapper.ytmusic-player-bar yt-formatted-string.byline.ytmusic-player-bar a',
+                'color: rgb(82,82,82)'],
+            // Player-bar like/dislike thumbs: same cache-fragility — the neutral thumb glyphs
+            // are only darkened by the cached icon-rescue, so a track change (node reuse) can
+            // leave them on YT's grey token, flipping their weight run-to-run. Pin the fill
+            // dark so both states (outline / filled-when-active) stay a consistent dark thumb.
+            ['ytmusic-player-bar ytmusic-like-button-renderer yt-button-shape, ytmusic-player-bar ytmusic-like-button-renderer svg, ytmusic-player-bar ytmusic-like-button-renderer svg path',
+                'color: rgb(20,20,20); fill: rgb(20,20,20)'],
             // Multi-select checkboxes (#14): same damped ~8% token on the hollow-square svg;
             // the icon-rescue skips it (fill alpha < 0.4 gate). Give the outline a visible
             // weight, and a near-black filled box when checked.
