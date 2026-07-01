@@ -387,7 +387,7 @@
         if (d === _lastDark) return;
         _lastDark = d;
         if (_canvasHost && _active) {
-            _canvasHost.style.background = (document.fullscreenElement === _canvasHost) ? '#000' : pageBgColor();
+            _canvasHost.style.background = isVizFullscreen() ? '#000' : pageBgColor();
         }
         var c = findSegmentContainer();
         if (c && c.classList.contains('milkviz-styled')) { styleSegContainer(c); killButtonBorders(c); }
