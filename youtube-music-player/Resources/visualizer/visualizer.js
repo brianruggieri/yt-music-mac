@@ -1315,6 +1315,7 @@
         const onDown = function () { _idle.reveal(); };
         const onFocus = function () { _idle.reveal(); };
         const onKey = function (e) {
+            if (e.key === 'Escape' && isVizFullscreen()) { exitFs(); return; }
             if (['ArrowLeft','ArrowRight',' ','k','m','f','Escape'].indexOf(e.key) !== -1) _idle.reveal();
         };
         const onScrubEnd = function () { _idle.setLock('scrub', false); };
