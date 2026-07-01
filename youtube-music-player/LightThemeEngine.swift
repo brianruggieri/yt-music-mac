@@ -816,7 +816,7 @@ enum LightThemeEngine {
             //   • over media (white glyph on album art + scrim)
             //   • on a dark/coloured surface (e.g. the white triangle on the #f03 play button)
             //   • saturated/brand glyphs (semantic colour, conveyed redundantly)
-            const mediaRects = [].slice.call(document.querySelectorAll('img, yt-img-shadow, [style*="background-image"]'))
+            const artRects = [].slice.call(document.querySelectorAll('img, yt-img-shadow, [style*="background-image"]'))
                 // Real media only: a background-image counts as "media" ONLY if it's an actual
                 // url() image — NOT a gradient. imgs always count.
                 .filter(m => m.tagName === 'IMG' || m.tagName === 'YT-IMG-SHADOW' || /url\(/i.test(getComputedStyle(m).backgroundImage))
@@ -828,6 +828,16 @@ enum LightThemeEngine {
                 // (thumbnails/covers) is ≤ ~540px and not inside these immersive containers.
                 .filter(m => !m.closest('ytmusic-fullbleed-thumbnail, ytmusic-immersive-header-renderer, .background-gradient'))
                 .map(m => m.getBoundingClientRect()).filter(b => b.width > 24 && b.height > 24 && b.width < 700);
+            // Video + the MilkDrop visualizer <canvas>: real FOREGROUND media that is
+            // legitimately large (the now-playing pane fills the player), so the 700px art cap
+            // must NOT apply. Their hover-overlay controls (fullscreen/expand/play) have to stay
+            // WHITE like dark mode: the canvas/video paints the visible backdrop but has no CSS
+            // opaque background, so effectiveBg would wrongly read the light player page behind
+            // it and darken the glyph to black. Same immersive full-bleed guard as art.
+            const vizRects = [].slice.call(document.querySelectorAll('video, canvas'))
+                .filter(m => !m.closest('ytmusic-fullbleed-thumbnail, ytmusic-immersive-header-renderer, .background-gradient'))
+                .map(m => m.getBoundingClientRect()).filter(b => b.width > 40 && b.height > 40);
+            const mediaRects = artRects.concat(vizRects);
             const overMedia = (r) => { const cx = r.left + r.width / 2, cy = r.top + r.height / 2; return mediaRects.some(b => cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom); };
             for (const ic of document.querySelectorAll('button svg, a svg, [role="button"] svg, tp-yt-paper-icon-button svg, yt-icon svg')) {
                 if (iconFixedEls.has(ic)) continue;
