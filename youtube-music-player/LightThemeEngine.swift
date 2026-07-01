@@ -841,6 +841,13 @@ enum LightThemeEngine {
             const overMedia = (r) => { const cx = r.left + r.width / 2, cy = r.top + r.height / 2; return mediaRects.some(b => cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom); };
             for (const ic of document.querySelectorAll('button svg, a svg, [role="button"] svg, tp-yt-paper-icon-button svg, yt-icon svg')) {
                 if (iconFixedEls.has(ic)) continue;
+                // Play buttons are fully governed by the dedicated static rules (the knockout
+                // dark default, the over-art WHITE exception, and the header/guide red). The
+                // audit's neutral-icon darkening was second-guessing them: on video/card play
+                // triangles its overMedia geometry reads false, so it stamped an inline grey
+                // !important that OVERRODE the white exception — black play buttons on art.
+                // Stand down and let the static play-button rules win.
+                if (ic.closest('ytmusic-play-button-renderer')) continue;
                 const ir = ic.getBoundingClientRect();
                 if (ir.width < 10 || ir.width > 56 || ir.height < 10 || ir.bottom < 0 || ir.top > innerHeight) continue;
                 const ist = getComputedStyle(ic);
