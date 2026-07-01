@@ -1,0 +1,322 @@
+[
+  {
+    "id": "album/neon-tide",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "Neon Tide",
+    "artist": "Nova Sonder"
+  },
+  {
+    "id": "album/afterglow",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "Afterglow",
+    "artist": "Nova Sonder"
+  },
+  {
+    "id": "album/slow-harvest",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "Slow Harvest",
+    "artist": "Marrow & Vine"
+  },
+  {
+    "id": "album/velvet-static",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "Velvet Static",
+    "artist": "Cassette Bloom"
+  },
+  {
+    "id": "album/coastlines",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "Coastlines",
+    "artist": "Cassette Bloom"
+  },
+  {
+    "id": "album/midnight-arcade",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "Midnight Arcade",
+    "artist": "Kite Machine"
+  },
+  {
+    "id": "album/golden-hour-blues",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "Golden Hour Blues",
+    "artist": "Odessa Grey"
+  },
+  {
+    "id": "album/paper-lanterns",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "Paper Lanterns",
+    "artist": "The Lantern Club"
+  },
+  {
+    "id": "album/wide-open-quiet",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "Wide Open Quiet",
+    "artist": "Halcyon Fields"
+  },
+  {
+    "id": "album/city-of-echoes",
+    "type": "album",
+    "w": 512,
+    "h": 512,
+    "title": "City of Echoes",
+    "artist": "Dro Mavi"
+  },
+  {
+    "id": "video/coastline-signal",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Coastline Signal",
+    "artist": "Nova Sonder"
+  },
+  {
+    "id": "video/paper-lanterns",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Paper Lanterns",
+    "artist": "The Lantern Club"
+  },
+  {
+    "id": "video/velvet-static",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Velvet Static",
+    "artist": "Cassette Bloom"
+  },
+  {
+    "id": "video/midnight-arcade",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Midnight Arcade",
+    "artist": "Kite Machine"
+  },
+  {
+    "id": "video/golden-hour",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Golden Hour",
+    "artist": "Odessa Grey"
+  },
+  {
+    "id": "video/slow-harvest",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Slow Harvest",
+    "artist": "Marrow & Vine"
+  },
+  {
+    "id": "video/city-of-echoes",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "City of Echoes",
+    "artist": "Dro Mavi"
+  },
+  {
+    "id": "video/wide-open",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Wide Open",
+    "artist": "Halcyon Fields"
+  },
+  {
+    "id": "video/afterglow",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Afterglow",
+    "artist": "Nova Sonder"
+  },
+  {
+    "id": "video/ferris-wheel",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Ferris Wheel",
+    "artist": "Kite Machine"
+  },
+  {
+    "id": "video/cedar-smoke",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Cedar & Smoke",
+    "artist": "Marrow & Vine"
+  },
+  {
+    "id": "video/undertow",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Undertow",
+    "artist": "Odessa Grey"
+  },
+  {
+    "id": "video/static-bloom",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Static Bloom",
+    "artist": "Cassette Bloom"
+  },
+  {
+    "id": "video/lantern-light",
+    "type": "video",
+    "w": 640,
+    "h": 360,
+    "title": "Lantern Light",
+    "artist": "The Lantern Club"
+  },
+  {
+    "id": "playlist/late-night-drive",
+    "type": "playlist",
+    "w": 512,
+    "h": 512,
+    "title": "Late Night Drive",
+    "owner": "Alex Rivera"
+  },
+  {
+    "id": "playlist/focus-flow",
+    "type": "playlist",
+    "w": 512,
+    "h": 512,
+    "title": "Focus Flow",
+    "owner": "Alex Rivera"
+  },
+  {
+    "id": "playlist/weekend-reset",
+    "type": "playlist",
+    "w": 512,
+    "h": 512,
+    "title": "Weekend Reset",
+    "owner": "Alex Rivera"
+  },
+  {
+    "id": "playlist/morning-coffee",
+    "type": "playlist",
+    "w": 512,
+    "h": 512,
+    "title": "Morning Coffee",
+    "owner": "Alex Rivera"
+  },
+  {
+    "id": "playlist/rainy-day-indie",
+    "type": "playlist",
+    "w": 512,
+    "h": 512,
+    "title": "Rainy Day Indie",
+    "owner": "Alex Rivera"
+  },
+  {
+    "id": "playlist/gym-rush",
+    "type": "playlist",
+    "w": 512,
+    "h": 512,
+    "title": "Gym Rush",
+    "owner": "Alex Rivera"
+  },
+  {
+    "id": "playlist/sunday-slowdown",
+    "type": "playlist",
+    "w": 512,
+    "h": 512,
+    "title": "Sunday Slowdown",
+    "owner": "Alex Rivera"
+  },
+  {
+    "id": "playlist/deep-work",
+    "type": "playlist",
+    "w": 512,
+    "h": 512,
+    "title": "Deep Work",
+    "owner": "Alex Rivera"
+  },
+  {
+    "id": "artist/nova-sonder",
+    "type": "artist",
+    "w": 512,
+    "h": 512,
+    "name": "Nova Sonder"
+  },
+  {
+    "id": "artist/marrow-vine",
+    "type": "artist",
+    "w": 512,
+    "h": 512,
+    "name": "Marrow & Vine"
+  },
+  {
+    "id": "artist/cassette-bloom",
+    "type": "artist",
+    "w": 512,
+    "h": 512,
+    "name": "Cassette Bloom"
+  },
+  {
+    "id": "artist/kite-machine",
+    "type": "artist",
+    "w": 512,
+    "h": 512,
+    "name": "Kite Machine"
+  },
+  {
+    "id": "artist/odessa-grey",
+    "type": "artist",
+    "w": 512,
+    "h": 512,
+    "name": "Odessa Grey"
+  },
+  {
+    "id": "artist/the-lantern-club",
+    "type": "artist",
+    "w": 512,
+    "h": 512,
+    "name": "The Lantern Club"
+  },
+  {
+    "id": "artist/halcyon-fields",
+    "type": "artist",
+    "w": 512,
+    "h": 512,
+    "name": "Halcyon Fields"
+  },
+  {
+    "id": "artist/dro-mavi",
+    "type": "artist",
+    "w": 512,
+    "h": 512,
+    "name": "Dro Mavi"
+  },
+  {
+    "id": "avatar",
+    "type": "avatar",
+    "w": 512,
+    "h": 512,
+    "name": "Alex Rivera",
+    "handle": "@alexrivera"
+  }
+]

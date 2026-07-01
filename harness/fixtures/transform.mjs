@@ -29,6 +29,19 @@ export function transform(root, fake) {
     }
   }
 
+  // Per-entity generated assets (album/video/playlist/artist/avatar) served by the fixture
+  // route from fixtures/assets/<path>.png. slug() must match the manifest ids.
+  const ASSET = 'https://fixture.invalid/asset';
+  const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  // point every thumbnail inside a renderer subtree at one asset url
+  function setThumb(node, url) {
+    (function f(n) {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n.thumbnails)) for (const t of n.thumbnails) if (t && typeof t.url === 'string') t.url = url;
+      for (const k in n) f(n[k]);
+    })(node);
+  }
+
   function visit(node) {
     if (Array.isArray(node)) { for (const x of node) visit(x); return; }
     if (!node || typeof node !== 'object') return;
@@ -55,19 +68,24 @@ export function transform(root, fake) {
       // trailing duration column, when present
       const fx = r.fixedColumns && r.fixedColumns[0] && r.fixedColumns[0].musicResponsiveListItemFixedColumnRenderer;
       if (fx) setText(fx.text, s.durationText);
+      setThumb(r, `${ASSET}/album/${slug(s.album)}.png`);   // a track row shows its album art
     }
     if (node.musicTwoRowItemRenderer) {
       const r = node.musicTwoRowItemRenderer;
       const sub0 = r.subtitle && r.subtitle.runs && r.subtitle.runs[0] && r.subtitle.runs[0].text || '';
-      if (/playlist/i.test(sub0)) { setText(r.title, nextPlaylist()); setText(r.subtitle, `Playlist • ${fake.profile.name}`); }
-      else if (/artist|subscriber/i.test(sub0)) { const a = nextArtist(); setText(r.title, a); setText(r.subtitle, 'Artist'); }
-      else { const a = nextAlbum(); setText(r.title, a.title); setText(r.subtitle, a.subtitle); }
+      // aspectRatio is the reliable card-type signal: 16:9 = video, SQUARE = album/playlist/artist.
+      const is169 = /16_9/.test(r.aspectRatio || '');
+      if (is169) { const s = nextSong(); setText(r.title, s.title); setText(r.subtitle, `${s.artist} • ${s.views}`); setThumb(r, `${ASSET}/video/${slug(s.title)}.png`); }
+      else if (/playlist/i.test(sub0)) { const p = nextPlaylist(); setText(r.title, p); setText(r.subtitle, `Playlist • ${fake.profile.name}`); setThumb(r, `${ASSET}/playlist/${slug(p)}.png`); }
+      else if (/artist|subscriber/i.test(sub0)) { const a = nextArtist(); setText(r.title, a); setText(r.subtitle, 'Artist'); setThumb(r, `${ASSET}/artist/${slug(a)}.png`); }
+      else { const a = nextAlbum(); setText(r.title, a.title); setText(r.subtitle, a.subtitle); setThumb(r, `${ASSET}/album/${slug(a.title)}.png`); }
     }
     if (node.playlistPanelVideoRenderer) {
       const r = node.playlistPanelVideoRenderer, s = nextSong();
       setText(r.title, s.title);
       setText(r.longBylineText, `${s.artist} • ${s.album} • 2024`);
       setText(r.lengthText, s.durationText);
+      setThumb(r, `${ASSET}/album/${slug(s.album)}.png`);
     }
     // --- now-playing (player.json) ---
     if (node.videoDetails && typeof node.videoDetails === 'object') {
@@ -75,7 +93,7 @@ export function transform(root, fake) {
       if ('title' in v) v.title = np.title;
       if ('author' in v) v.author = np.artist;
       if ('lengthSeconds' in v) v.lengthSeconds = String(np.durationSeconds);
-      rewriteThumbs(v.thumbnail, ART_SENTINEL);
+      rewriteThumbs(v.thumbnail, `${ASSET}/album/${slug(np.album)}.png`);   // now-playing art
     }
     // storyboard scrubber sprite (non-visual seek preview) carries a real videoId URL — blank it
     if (node.playerStoryboardSpecRenderer) node.playerStoryboardSpecRenderer.spec = '';
@@ -89,7 +107,7 @@ export function transform(root, fake) {
       const h = node.activeAccountHeaderRenderer;
       setText(h.accountName, fake.profile.name);
       setText(h.channelHandle, fake.profile.handle);
-      rewriteThumbs(h.accountPhoto, AVATAR_SENTINEL);
+      rewriteThumbs(h.accountPhoto, `${ASSET}/avatar.png`);
     }
     // shelf strapline = the personalized owner name ("BRIAN RUGGIERI") above a shelf title;
     // it's the real account name, so swap it for the fake user (keep the shelf title itself).
@@ -98,6 +116,7 @@ export function transform(root, fake) {
       const H = node.musicCarouselShelfBasicHeaderRenderer;
       const orig = H.strapline.runs && H.strapline.runs[0] && H.strapline.runs[0].text;
       setText(H.strapline, fake.profile.name);
+      setThumb(H, `${ASSET}/avatar.png`);   // the round owner avatar beside the strapline
       if (orig) (function fix(n) {
         if (!n || typeof n !== 'object') return;
         if (typeof n.label === 'string' && n.label.includes(orig)) n.label = n.label.split(orig).join(fake.profile.name);
@@ -113,9 +132,14 @@ export function transform(root, fake) {
       if (node.guideEntryRenderer.formattedSubtitle) setText(node.guideEntryRenderer.formattedSubtitle, fake.profile.name);
     }
 
-    // --- generic thumbnail scrub (any musicThumbnailRenderer / thumbnails[] not already the avatar) ---
-    if (node.musicThumbnailRenderer && node.musicThumbnailRenderer.thumbnail) rewriteThumbs(node.musicThumbnailRenderer.thumbnail, ART_SENTINEL);
-    if (Array.isArray(node.thumbnails) && node.thumbnails.some(t => t && t.url && t.url !== AVATAR_SENTINEL)) rewriteThumbs(node, ART_SENTINEL);
+    // --- generic thumbnail scrub: any REAL (un-rewritten) thumbnail -> black square. Skip
+    // ones a handler already pointed at a fixture asset (fixture.invalid/...), so per-entity
+    // art survives. This catches art in renderers we don't special-case (real hosts leak PII). ---
+    if (node.musicThumbnailRenderer && node.musicThumbnailRenderer.thumbnail) {
+      const th = node.musicThumbnailRenderer.thumbnail;
+      if (Array.isArray(th.thumbnails) && th.thumbnails.some(t => t && t.url && !/fixture\.invalid/.test(t.url))) rewriteThumbs(th, ART_SENTINEL);
+    }
+    if (Array.isArray(node.thumbnails) && node.thumbnails.some(t => t && t.url && !/fixture\.invalid/.test(t.url))) rewriteThumbs(node, ART_SENTINEL);
 
     for (const k in node) visit(node[k]);
   }

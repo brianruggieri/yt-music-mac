@@ -40,8 +40,18 @@ export async function installFixture(context) {
     if (!file || !fs.existsSync(dataFile(file))) return route.continue();
     return route.fulfill({ status: 200, contentType: 'application/json', body: load(file) });
   });
-  // fake avatar (must beat the black-square net; distinct host path so no conflict)
-  await context.route(/fixture\.invalid\/avatar/, (r) => r.fulfill({ contentType: 'image/svg+xml', body: AVATAR }));
+  // per-entity generated assets: fixture.invalid/asset/<path>.png -> fixtures/assets/<path>.png
+  // (album/video/playlist/artist covers + avatar). Missing asset -> black square fallback.
+  await context.route(/fixture\.invalid\/asset\//, (route) => {
+    // URLs are .png (from the transform); assets on disk are downscaled .jpg. Resolve by
+    // stem and serve whichever exists with the right content-type. Missing -> black square.
+    const stem = new URL(route.request().url()).pathname.replace(/^\/asset\//, '').replace(/\.(png|jpe?g)$/i, '');
+    for (const [ext, ct] of [['jpg', 'image/jpeg'], ['png', 'image/png']]) {
+      const file = new URL(`./assets/${stem}.${ext}`, import.meta.url);
+      try { if (fs.existsSync(file)) return route.fulfill({ contentType: ct, body: fs.readFileSync(file) }); } catch {}
+    }
+    return route.fulfill({ contentType: 'image/svg+xml', body: BLACK });
+  });
   await context.route(/fixture\.invalid\/art/, (r) => r.fulfill({ contentType: 'image/svg+xml', body: BLACK }));
   // safety net: any real thumbnail host -> black square (covers any art we didn't rewrite)
   await context.route(/(yt3|lh3|i)\.(googleusercontent|ytimg|ggpht)\.com|yt3\.ggpht\.com|googleusercontent\.com/, (r) =>
