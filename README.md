@@ -74,6 +74,17 @@ Importing playlists requires your own Spotify app credentials:
 - macOS 14.0 (Sonoma) or later
 - Xcode 16+ (for building)
 
+## Acknowledgements
+
+The visualizer is powered by [Butterchurn](https://github.com/jberg/butterchurn) and
+[butterchurn-presets](https://github.com/jberg/butterchurn-presets) by Jordan Berg
+([jberg](https://github.com/jberg)) — a WebGL2 reimplementation of Ryan Geiss's original
+[MilkDrop](https://www.geisswerks.com/milkdrop/) visualizer. Both are MIT-licensed; their
+license texts are vendored alongside the code in
+[`youtube-music-player/Resources/visualizer/`](youtube-music-player/Resources/visualizer/).
+
 ## License
 
 MIT
+
+Third-party components retain their own licenses — see the Acknowledgements above.

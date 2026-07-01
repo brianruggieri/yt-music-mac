@@ -917,6 +917,7 @@
     var setBarPresetLabel = function () {};  // no-op until Task 3 reassigns it
 
     let _fsBtn = null;
+    let _credit = null;
     let _fsGradient = null;
     let _fsChangeHandler = null;
 
@@ -968,6 +969,8 @@
             '#milkviz-canvas-host:hover #milkviz-fs-gradient{opacity:1 !important;}',
             '#milkviz-canvas-host:hover #milkviz-fs-btn{opacity:0.9 !important;}',
             '#milkviz-fs-btn:hover{opacity:1 !important;}',
+            '#milkviz-canvas-host:hover #milkviz-credit{opacity:0.55 !important;}',
+            '#milkviz-credit:hover{opacity:0.95 !important;}',
         ].join('');
         document.head.appendChild(css);
     }
@@ -1496,6 +1499,26 @@
         _fsBtn = btn;
         applyFsChrome();   // theme-match the gradient + icon to YT's video/album-art scrim
 
+        // Attribution: Butterchurn powers the visuals (MIT, jberg). Bottom-left, hover-revealed
+        // like the fs button. Sibling of the canvas so the preset-skip handler's canvas.contains()
+        // check ignores it; the http(s) link falls through the nav delegate's allowlist and opens
+        // in the system browser (github.com isn't allowlisted). stopPropagation is belt-and-braces.
+        const credit = document.createElement('a');
+        credit.id = 'milkviz-credit';
+        credit.href = 'https://github.com/jberg/butterchurn';
+        credit.textContent = 'Butterchurn';
+        credit.title = 'MilkDrop-style visuals by Butterchurn (jberg) — opens GitHub';
+        credit.target = '_blank';
+        credit.rel = 'noopener noreferrer';
+        credit.style.cssText =
+            'position:absolute;left:18px;bottom:14px;z-index:3;' +
+            'font:500 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.02em;' +
+            'color:#fff;text-decoration:none;text-shadow:0 1px 2px rgba(0,0,0,0.6);' +
+            'opacity:0;transition:opacity .2s ease;cursor:pointer;pointer-events:auto;';
+        credit.addEventListener('click', function (e) { e.stopPropagation(); });
+        _canvasHost.appendChild(credit);
+        _credit = credit;
+
         _fsChangeHandler = function () {
             const inFs = isVizFullscreen();
             if (_canvasHost) {
@@ -1532,6 +1555,7 @@
         document.documentElement.classList.remove('milkviz-idle');   // belt-and-braces (video adapter)
         _activeAdapter = null;   // reset the global handler's state so a later fs re-fires cleanly
         if (_fsBtn) { _fsBtn.remove(); _fsBtn = null; }
+        if (_credit) { _credit.remove(); _credit = null; }
         if (_fsGradient) { _fsGradient.remove(); _fsGradient = null; }
     }
 

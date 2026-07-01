@@ -142,6 +142,16 @@ struct YouTubeMusicWebView: NSViewRepresentable {
             ::-webkit-scrollbar-corner {
                 background: transparent !important;
             }
+            /* Dark<->light theme crossfade (View Transitions API, driven by the light
+               engine's switchMode). The UA default is a 250ms crossfade; a full-viewport
+               theme fade reads better a touch slower — 400ms ease. Scoped to the engine's
+               `ytm-theme-vt` marker class (added on <html> only around OUR transition) so we
+               never restyle a view transition other page code might run; plays both ways. */
+            html.ytm-theme-vt::view-transition-old(root),
+            html.ytm-theme-vt::view-transition-new(root) {
+                animation-duration: 400ms;
+                animation-timing-function: ease;
+            }
         """
         let cssJs = """
             (function() {
