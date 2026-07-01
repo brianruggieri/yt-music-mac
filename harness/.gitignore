@@ -3,3 +3,9 @@ test-results/
 playwright-report/
 auth.json
 cookies.json
+
+# deterministic-fixture raw captures (contain real account data) — never commit
+fixtures/capture/
+fixtures/scout.mjs
+fixtures/demo-*.png
+fixtures/dbg*.mjs

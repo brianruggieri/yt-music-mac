@@ -1,0 +1,70 @@
+{
+  "_note": "Deterministic fake user for light-mode screenshots. All data invented; zero real PII. Shapes mirror YT Music youtubei responses observed in fixtures/capture (byline 'Artist • Album • Year' or 'Artist • N views • M likes'; card subtitle 'Album • Artist' / 'Playlist • Owner • N tracks' / 'Artist • N subscribers').",
+  "albumArt": "Album art is NOT provided as images here. The fixture layer renders every album/thumbnail as a solid BLACK square so play-button and overlay detection still works over 'media'. This file is text/metadata only.",
+  "profile": {
+    "name": "Alex Rivera",
+    "handle": "@alexrivera",
+    "email": "alex.rivera@example.com"
+  },
+  "avatar": "fixtures/fake-avatar.svg",
+  "nowPlaying": {
+    "title": "Coastline Signal",
+    "artist": "Nova Sonder",
+    "album": "Neon Tide",
+    "year": 2024,
+    "durationSeconds": 222,
+    "positionSeconds": 0,
+    "durationText": "3:42",
+    "byline": "Nova Sonder • Neon Tide • 2024",
+    "views": "4.2M views",
+    "likes": "58K"
+  },
+  "songs": [
+    { "title": "Coastline Signal", "artist": "Nova Sonder", "album": "Neon Tide", "durationText": "3:42", "views": "4.2M views", "plays": "4,218,904" },
+    { "title": "Paper Lanterns", "artist": "The Lantern Club", "album": "Paper Lanterns", "durationText": "4:05", "views": "1.1M views", "plays": "1,092,340" },
+    { "title": "Velvet Static", "artist": "Cassette Bloom", "album": "Velvet Static", "durationText": "3:18", "views": "2.7M views", "plays": "2,703,118" },
+    { "title": "Midnight Arcade", "artist": "Kite Machine", "album": "Midnight Arcade", "durationText": "5:11", "views": "890K views", "plays": "889,502" },
+    { "title": "Golden Hour", "artist": "Odessa Grey", "album": "Golden Hour Blues", "durationText": "3:56", "views": "6.4M views", "plays": "6,401,772" },
+    { "title": "Slow Harvest", "artist": "Marrow & Vine", "album": "Slow Harvest", "durationText": "4:22", "views": "512K views", "plays": "511,984" },
+    { "title": "City of Echoes", "artist": "Dro Mavi", "album": "City of Echoes", "durationText": "3:07", "views": "8.9M views", "plays": "8,904,551" },
+    { "title": "Wide Open", "artist": "Halcyon Fields", "album": "Wide Open Quiet", "durationText": "6:48", "views": "245K views", "plays": "244,870" },
+    { "title": "Afterglow", "artist": "Nova Sonder", "album": "Afterglow", "durationText": "3:33", "views": "3.5M views", "plays": "3,509,231" },
+    { "title": "Ferris Wheel", "artist": "Kite Machine", "album": "Midnight Arcade", "durationText": "4:47", "views": "1.4M views", "plays": "1,398,006" },
+    { "title": "Cedar & Smoke", "artist": "Marrow & Vine", "album": "Slow Harvest", "durationText": "3:29", "views": "703K views", "plays": "702,615" },
+    { "title": "Undertow", "artist": "Odessa Grey", "album": "Golden Hour Blues", "durationText": "4:12", "views": "2.1M views", "plays": "2,110,447" },
+    { "title": "Static Bloom", "artist": "Cassette Bloom", "album": "Coastlines", "durationText": "3:51", "views": "967K views", "plays": "966,720" },
+    { "title": "Lantern Light", "artist": "The Lantern Club", "album": "Paper Lanterns", "durationText": "3:44", "views": "1.8M views", "plays": "1,802,559" }
+  ],
+  "albums": [
+    { "title": "Neon Tide", "artist": "Nova Sonder", "subtitle": "Album • Nova Sonder" },
+    { "title": "Afterglow", "artist": "Nova Sonder", "subtitle": "Album • Nova Sonder" },
+    { "title": "Slow Harvest", "artist": "Marrow & Vine", "subtitle": "Album • Marrow & Vine" },
+    { "title": "Velvet Static", "artist": "Cassette Bloom", "subtitle": "Album • Cassette Bloom" },
+    { "title": "Coastlines", "artist": "Cassette Bloom", "subtitle": "Album • Cassette Bloom" },
+    { "title": "Midnight Arcade", "artist": "Kite Machine", "subtitle": "Album • Kite Machine" },
+    { "title": "Golden Hour Blues", "artist": "Odessa Grey", "subtitle": "Album • Odessa Grey" },
+    { "title": "Paper Lanterns", "artist": "The Lantern Club", "subtitle": "Album • The Lantern Club" },
+    { "title": "Wide Open Quiet", "artist": "Halcyon Fields", "subtitle": "Album • Halcyon Fields" },
+    { "title": "City of Echoes", "artist": "Dro Mavi", "subtitle": "Album • Dro Mavi" }
+  ],
+  "artists": [
+    "Nova Sonder",
+    "Marrow & Vine",
+    "Cassette Bloom",
+    "Kite Machine",
+    "Odessa Grey",
+    "The Lantern Club",
+    "Halcyon Fields",
+    "Dro Mavi"
+  ],
+  "playlists": [
+    "Late Night Drive",
+    "Focus Flow",
+    "Weekend Reset",
+    "Morning Coffee",
+    "Rainy Day Indie",
+    "Gym Rush",
+    "Sunday Slowdown",
+    "Deep Work"
+  ]
+}
