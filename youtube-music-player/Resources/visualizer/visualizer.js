@@ -389,6 +389,7 @@
         if (_canvasHost && _active) {
             _canvasHost.style.background = isVizFullscreen() ? '#000' : pageBgColor();
         }
+        applyFsChrome();   // re-match the hover overlay gradient + icon to the new theme
         var c = findSegmentContainer();
         if (c && c.classList.contains('milkviz-styled')) { styleSegContainer(c); killButtonBorders(c); }
     }
@@ -919,12 +920,27 @@
     let _fsGradient = null;
     let _fsChangeHandler = null;
 
-    // Standard "enter fullscreen" glyph — four L-shaped corner brackets, white 2px strokes.
+    // Standard "enter fullscreen" glyph — four L-shaped corner brackets. Stroke follows the
+    // button's `color` (set per-theme by applyFsChrome) so the icon stays legible on the
+    // theme-matched hover scrim.
     const FS_ICON_SVG =
-        '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#fff" ' +
+        '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" ' +
         'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
         '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>' +
         '</svg>';
+
+    // Theme-match the windowed top hover overlay to YT's video/album-art scrim: white gradient +
+    // dark icon in light mode, dark gradient + white icon in dark mode. Called on create and on
+    // every runtime theme swap (reTheme).
+    function applyFsChrome() {
+        var dark = currentDark();
+        if (_fsGradient) {
+            _fsGradient.style.background = dark
+                ? 'linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0))'
+                : 'linear-gradient(to bottom, rgba(255,255,255,0.85), rgba(255,255,255,0))';
+        }
+        if (_fsBtn) _fsBtn.style.color = dark ? '#fff' : '#0f0f0f';
+    }
 
     // SVG glyphs for the fullscreen control bar. Stroke style matches FS_ICON_SVG.
     const ICON = {
@@ -1439,8 +1455,7 @@
         grad.id = 'milkviz-fs-gradient';
         grad.style.cssText =
             'position:absolute;top:0;left:0;right:0;height:72px;' +
-            'background:linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0));' +
-            'opacity:0;transition:opacity .2s ease;pointer-events:none;z-index:2;';
+            'opacity:0;transition:opacity .2s ease;pointer-events:none;z-index:2;';   // background set by applyFsChrome (theme-aware)
         _canvasHost.appendChild(grad);
         _fsGradient = grad;
 
@@ -1473,6 +1488,7 @@
 
         _canvasHost.appendChild(btn);
         _fsBtn = btn;
+        applyFsChrome();   // theme-match the gradient + icon to YT's video/album-art scrim
 
         _fsChangeHandler = function () {
             const inFs = isVizFullscreen();
