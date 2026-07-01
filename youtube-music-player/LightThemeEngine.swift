@@ -715,7 +715,7 @@ enum LightThemeEngine {
                 // it styles its own track/buttons in both themes. The auto-border audit used
                 // to stamp inline hairlines on its pill buttons, which the visualizer then had
                 // to chase with a counter-observer — skip the whole control here instead.
-                if (el.closest('ytmusic-av-toggle')) continue;
+                if (el.closest('ytmusic-av-toggle') || el.closest('#milkviz-canvas-host')) continue;
                 const st = getComputedStyle(el);
                 if (st.position === 'absolute' || st.position === 'fixed') continue;   // overlays, not surfaces
                 if ((parseFloat(st.borderTopLeftRadius) || 0) < 4) continue;     // not card-like
@@ -744,7 +744,7 @@ enum LightThemeEngine {
             if (degraded || document.documentElement.getAttribute('data-ytm-mode') !== 'light') return 1;
             let total = 0, failing = 0;
             for (const el of collectText(document.body, [])) {
-                if (el.closest('ytmusic-av-toggle')) continue;   // visualizer-owned control; engine stands down (see scan())
+                if (el.closest('ytmusic-av-toggle') || el.closest('#milkviz-canvas-host')) continue;   // visualizer-owned control; engine stands down (see scan())
                 const st = getComputedStyle(el);
                 if (st.visibility === 'hidden' || st.opacity === '0') continue;
                 const rect = el.getBoundingClientRect();
@@ -817,6 +817,7 @@ enum LightThemeEngine {
             const overMedia = (r) => { const cx = r.left + r.width / 2, cy = r.top + r.height / 2; return mediaRects.some(b => cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom); };
             for (const ic of document.querySelectorAll('button svg, a svg, [role="button"] svg, tp-yt-paper-icon-button svg, yt-icon svg')) {
                 if (iconFixedEls.has(ic)) continue;
+                if (ic.closest('#milkviz-canvas-host')) continue;   // visualizer-owned overlay (FS button + bar) sets its own white icons (matches YT media controls)
                 const ir = ic.getBoundingClientRect();
                 if (ir.width < 10 || ir.width > 56 || ir.height < 10 || ir.bottom < 0 || ir.top > innerHeight) continue;
                 const ist = getComputedStyle(ic);
