@@ -912,9 +912,19 @@ enum LightThemeEngine {
             if (!canAnimate) { switchMode(next); return; }
             pendingMode = next;
             try {
+                // Mark <html> so the tuned crossfade duration (see the base stylesheet's
+                // `html.ytm-theme-vt::view-transition-*` rule) applies to OUR transition
+                // only — never restyling a view transition some other page code might run.
+                de.classList.add('ytm-theme-vt');
+                const done = () => de.classList.remove('ytm-theme-vt');
                 const vt = document.startViewTransition(() => switchMode(next));
-                if (vt && vt.finished && vt.finished.catch) vt.finished.catch(() => {});   // a skipped transition still runs the callback; swallow the reject
-            } catch (e) { switchMode(next); }   // WKWebView lifecycle edge: fall back to an instant flip
+                // A skipped transition (rapid re-toggle) rejects ready/finished — its update
+                // callback still runs, so just swallow the rejects and always drop the marker.
+                if (vt) {
+                    if (vt.ready && vt.ready.catch) vt.ready.catch(() => {});
+                    if (vt.finished && vt.finished.then) vt.finished.then(done, done); else done();
+                } else { done(); }
+            } catch (e) { de.classList.remove('ytm-theme-vt'); switchMode(next); }   // WKWebView lifecycle edge: fall back to an instant flip
         }
 
         // #nav-bar-background is recolored inline by YT (dark, from page content +
