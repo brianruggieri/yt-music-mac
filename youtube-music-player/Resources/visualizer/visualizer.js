@@ -929,17 +929,22 @@
         '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>' +
         '</svg>';
 
-    // Theme-match the windowed top hover overlay to YT's video/album-art scrim: white gradient +
-    // dark icon in light mode, dark gradient + white icon in dark mode. Called on create and on
-    // every runtime theme swap (reTheme).
+    // Same rgb, alpha 0 — so the gradient fades to a transparent version of ITS OWN color
+    // (the `transparent` keyword interpolates through grey in WebKit and would dirty the fade).
+    function _fadeOut(c) {
+        var m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(c);
+        return m ? 'rgba(' + m[1] + ',' + m[2] + ',' + m[3] + ',0)' : 'transparent';
+    }
+
+    // Theme-match the windowed top hover overlay to YT's video/album-art scrim: fade from the page
+    // background color (off-white in light, near-black in dark) to transparent, with a legible icon.
+    // Called on create and on every runtime theme swap (reTheme).
     function applyFsChrome() {
-        var dark = currentDark();
+        var bg = pageBgColor();
         if (_fsGradient) {
-            _fsGradient.style.background = dark
-                ? 'linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0))'
-                : 'linear-gradient(to bottom, rgba(255,255,255,0.85), rgba(255,255,255,0))';
+            _fsGradient.style.background = 'linear-gradient(to bottom, ' + bg + ', ' + _fadeOut(bg) + ')';
         }
-        if (_fsBtn) _fsBtn.style.color = dark ? '#fff' : '#0f0f0f';
+        if (_fsBtn) _fsBtn.style.color = currentDark() ? '#fff' : '#0f0f0f';
     }
 
     // SVG glyphs for the fullscreen control bar. Stroke style matches FS_ICON_SVG.
