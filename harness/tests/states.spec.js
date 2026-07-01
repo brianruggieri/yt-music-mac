@@ -25,8 +25,9 @@ test.beforeEach(async ({ page, context }) => {
 const MAX_TAB = 160;   // cap the focus walk so it can't run unbounded
 const HOVER_TIMEOUT = 1500;
 
-async function settle(page) {
-  await page.waitForFunction(() => document.documentElement.getAttribute('data-ytm-mode') === 'light', null, { timeout: 20_000 }).catch(() => {});
+async function settle(page, mode) {
+  const want = mode === 'dark' ? 'dark' : 'light';
+  await page.waitForFunction((m) => document.documentElement.getAttribute('data-ytm-mode') === m, want, { timeout: 20_000 }).catch(() => {});
   // Wait for content to actually populate (a real, viewport-sized scroll area appears),
   // otherwise we'd sweep a half-loaded page and pass vacuously.
   await page.waitForFunction(() => window.__ytmProbe && window.__ytmProbe.scrollInfo().max > 400, null, { timeout: 20_000 }).catch(() => {});
@@ -36,9 +37,11 @@ async function settle(page) {
 
 for (const screen of SCREENS) {
   test(`states: ${screen.name}`, async ({ page }, info) => {
-    test.skip(info.project.name !== 'light', 'state sweeps are light-mode only');
+    // Runs in BOTH light and dark. Light audits our theme; dark is a canary — it asserts the
+    // engine stays inert (native dark unbroken) and that YT dark stays accessible. Fixtures
+    // make dark deterministic, so this is stable rather than the old flaky live sweep.
     await page.goto(BASE + screen.path, { waitUntil: 'commit' });
-    await settle(page);
+    await settle(page, info.project.name);
 
     const issues = [];          // hard: text-contrast failures (gate)
     const notes = [];           // soft: missing focus rings, off-screen focus (report)
