@@ -27,9 +27,10 @@ export const INTERACTIONS = [
     name: 'track-context-menu',
     path: '/',
     async open(page) {
-      // pick a real track ROW (one that actually has an Action menu), not a header/hidden item
-      const item = page.locator('ytmusic-responsive-list-item-renderer')
-        .filter({ has: page.locator('button[aria-label="Action menu" i]') }).first();
+      // pick a real, ON-SCREEN track ROW in a shelf (not a hidden queue/ghost row, which the
+      // bare `.first()` would grab and then fail to scroll into view).
+      const item = page.locator('ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer, ytmusic-carousel-shelf-renderer ytmusic-responsive-list-item-renderer')
+        .filter({ has: page.locator('button[aria-label="Action menu" i]'), visible: true }).first();
       await item.scrollIntoViewIfNeeded(T);
       await item.hover(T);
       await page.waitForTimeout(300);   // let the overflow (⋮) button fade in on hover
@@ -41,8 +42,9 @@ export const INTERACTIONS = [
     name: 'account-menu',
     path: '/',
     async open(page) {
-      // The avatar trigger varies; try several, fall back to the settings button (also a menu).
-      const trigger = page.locator('button[aria-label*="Account" i], #avatar-btn, ytmusic-nav-bar img.yt-img-shadow, ytmusic-settings-button').first();
+      // The avatar button (top-right). Its real label is "Open avatar menu"; keep the older
+      // fallbacks for live/logged-out variants.
+      const trigger = page.locator('button[aria-label="Open avatar menu" i], button[aria-label*="Account" i], ytmusic-nav-bar button:has(img)').first();
       await trigger.waitFor({ state: 'visible', ...T });
       await trigger.click(T);
       await page.locator(POPUP + ', tp-yt-iron-dropdown').first().waitFor({ state: 'visible', ...T });

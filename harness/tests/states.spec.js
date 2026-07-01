@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { loadEngineScript } from '../lib/engine.js';
 import { PROBE } from '../lib/probe-inpage.js';
 import { BASE, SCREENS } from '../screens.js';
+import { installFixture } from '../fixtures/fixture.mjs';
 
 const ENGINE = loadEngineScript();
 
@@ -15,7 +16,8 @@ const ENGINE = loadEngineScript();
 //
 // :hover/:active can't be faked from JS and :focus-visible needs real keyboard, so
 // these are driven with Playwright's real input, not synthetic events.
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, context }) => {
+  if (!process.env.YTM_LIVE) await installFixture(context);   // deterministic fixtures (YTM_LIVE=1 for live)
   await page.addInitScript({ content: ENGINE });
   await page.addInitScript({ content: PROBE });
 });

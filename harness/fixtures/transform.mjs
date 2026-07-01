@@ -37,6 +37,13 @@ export function transform(root, fake) {
     // shouldn't carry it); leave opaque trackingParams alone (load-bearing, non-personal).
     if (typeof node.visitorData === 'string') node.visitorData = '';
 
+    // Strip lazy-load continuations: otherwise the SPA fires continuation XHRs (served the
+    // same home again) and how many fire is timing-dependent -> variable layout -> flaky
+    // screenshots. Removing them freezes each surface to exactly its first page.
+    for (const k of Object.keys(node)) {
+      if (k === 'continuations' || k === 'continuationEndpoint' || k === 'continuationItemRenderer' || k === 'nextContinuationData') delete node[k];
+    }
+
     // --- content renderers ---
     if (node.musicResponsiveListItemRenderer) {
       const r = node.musicResponsiveListItemRenderer, s = nextSong();

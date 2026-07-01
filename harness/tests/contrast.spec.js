@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { loadEngineScript } from '../lib/engine.js';
 import { auditContrast } from '../lib/audit.js';
 import { BASE, SCREENS, INTERACTIONS } from '../screens.js';
+import { installFixture } from '../fixtures/fixture.mjs';
 
 const ENGINE = loadEngineScript();
 
@@ -9,7 +10,11 @@ const ENGINE = loadEngineScript();
 // WKUserScript). It self-drives off prefers-color-scheme, which Playwright forces
 // per-project via `colorScheme`, so the engine applies light in the light project
 // and stays inert (native dark) in the dark project.
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, context }) => {
+  // Deterministic fake fixtures by default (frozen content → stable screenshots, no PII,
+  // reliable modal triggers). Set YTM_LIVE=1 to run against real music.youtube.com (the
+  // old canary mode — catches YT redesigns, but rotates content and can flaky-skip modals).
+  if (!process.env.YTM_LIVE) await installFixture(context);
   await page.addInitScript({ content: ENGINE });
 });
 
@@ -21,7 +26,12 @@ async function settle(page, mode) {
     mode === 'light' ? 'light' : 'dark',
     { timeout: 20_000 },
   ).catch(() => {});
-  await page.waitForTimeout(6000);
+  // Wait for REAL content to render (a shelf/row/card) and the network to go idle, so a
+  // screenshot can't capture a half-painted frame (the old blind 6s occasionally did →
+  // rare ~10% diffs). Fixtures make this fast and deterministic.
+  await page.waitForSelector('ytmusic-carousel-shelf-renderer, ytmusic-shelf-renderer, ytmusic-responsive-list-item-renderer, ytmusic-two-row-item-renderer', { timeout: 15_000 }).catch(() => {});
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await page.waitForTimeout(1500);
 }
 
 function report(screen, failures) {
@@ -40,12 +50,13 @@ for (const screen of SCREENS) {
     await page.goto(BASE + screen.path, { waitUntil: 'commit' });
     await settle(page, mode);
 
-    // Visual snapshot per screen × theme. NOTE: music.youtube.com serves personalized,
-    // rotating content, so pixels drift run-to-run (different art/rows). This diff is a
-    // GROSS-BREAKAGE backstop only (a theme break diffs ~80%+; content shuffle ~20%) —
-    // the precise, content-independent theme gates are the contrast/icon/state sweeps.
+    // Visual snapshot per screen × theme. Content is now frozen by the fixture layer
+    // (deterministic fake data + black-square art), so this is a tight pixel gate (0.03: tolerates ~0.01% AA jitter, catches theme breaks ~80%) that
+    // catches real theme drift — not the old 0.45 gross-breakage backstop that the live,
+    // rotating content forced. (Run with YTM_LIVE=1 and it loosens conceptually — but the
+    // baselines are the fixture ones, so live is for the audits, not the screenshot gate.)
     await expect(page).toHaveScreenshot(`${screen.name}-${mode}.png`, {
-      maxDiffPixelRatio: 0.45,
+      maxDiffPixelRatio: 0.03,
       animations: 'disabled',
     });
 
@@ -74,7 +85,7 @@ for (const ix of INTERACTIONS) {
     await page.waitForTimeout(1200); // let the engine theme the freshly-opened surface
 
     await expect(page).toHaveScreenshot(`modal-${ix.name}-${mode}.png`, {
-      maxDiffPixelRatio: 0.45,   // gross-breakage backstop; content behind the modal drifts (see screen note)
+      maxDiffPixelRatio: 0.03,   // tight gate: fixtures freeze the content behind the modal too
       animations: 'disabled',
     });
 

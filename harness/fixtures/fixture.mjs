@@ -7,7 +7,9 @@ import zlib from 'zlib';
 const dataFile = (n) => new URL(`./data/${n}.json`, import.meta.url);
 const load = (n) => fs.readFileSync(dataFile(n));
 const AVATAR = fs.readFileSync(new URL('./fake-avatar.svg', import.meta.url));
-const BLACK = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="#000"/></svg>');
+// Non-trivial intrinsic size: a 1x1 collapses YT's intrinsic-sized <img>/yt-img-shadow to
+// 0x0, which breaks layout, "visible" checks (avatar trigger) and scrollIntoView (rows).
+const BLACK = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" fill="#000"/></svg>');
 
 const browseMap = {
   FEmusic_home: 'browse-home', FEmusic_explore: 'browse-explore',
