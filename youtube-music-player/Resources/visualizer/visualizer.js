@@ -925,6 +925,19 @@
         '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>' +
         '</svg>';
 
+    // SVG glyphs for the fullscreen control bar. Stroke style matches FS_ICON_SVG.
+    const ICON = {
+        prev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M20 5l-10 7 10 7z"/></svg>',
+        next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M4 5l10 7-10 7z"/></svg>',
+        play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4l14 8-14 8z" fill="#fff" stroke="none"/></svg>',
+        pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M17 4v16"/></svg>',
+        vol: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9zM16 8a5 5 0 010 8"/></svg>',
+        volMute: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9zM17 9l4 6M21 9l-4 6"/></svg>',
+        presetPrev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+        presetNext: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+        exitFs: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M4 15h5v5M15 20v-5h5"/></svg>',
+    };
+
     // Hover reveal via CSS so it tracks the real pointer state on the fixed host.
     // !important beats the elements' inline opacity:0.
     function injectFsCss() {
@@ -937,6 +950,216 @@
             '#milkviz-fs-btn:hover{opacity:1 !important;}',
         ].join('');
         document.head.appendChild(css);
+    }
+
+    // --- Task 3: Fullscreen control bar DOM, CSS, and idle reveal/hide ---
+
+    function injectBarCss() {
+        if (document.getElementById('milkviz-bar-css')) return;
+        const css = document.createElement('style');
+        css.id = 'milkviz-bar-css';
+        css.textContent = [
+            // Scrim + bar container. Hidden by default (opacity 0 + slide down); .visible reveals.
+            '#milkviz-bar{position:absolute;left:0;right:0;bottom:0;z-index:5;',
+            'padding:28px 24px 16px;box-sizing:border-box;pointer-events:auto;',
+            'background:linear-gradient(to top,rgba(0,0,0,.75) 0%,rgba(0,0,0,.55) 28%,rgba(0,0,0,0) 100%);',
+            'opacity:0;transform:translateY(10px);visibility:hidden;',
+            // Delay the visibility:hidden flip until AFTER the opacity/transform fade (0s @ .35s),
+            // so the bar actually fades out over 350ms instead of snapping. Reveal flips
+            // visibility immediately (0s @ 0s) so the fade-in is visible.
+            'transition:opacity .35s ease, transform .35s ease, visibility 0s linear .35s;',
+            'font-family:"Roboto",sans-serif;}',
+            '#milkviz-bar.visible{opacity:1;transform:translateY(0);visibility:visible;',
+            'transition:opacity .18s cubic-bezier(.16,1,.3,1), transform .18s cubic-bezier(.16,1,.3,1), visibility 0s;}',
+            // Thin scrubbable progress line across the top of the bar.
+            '#milkviz-seek{position:relative;height:3px;border-radius:2px;cursor:pointer;',
+            'background:rgba(255,255,255,.3);margin-bottom:14px;}',
+            '#milkviz-seek-played{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:2px;',
+            'background:#f00;}',
+            '#milkviz-seek-knob{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;',
+            'background:#f00;transform:translate(-50%,-50%);left:0;opacity:0;transition:opacity .1s;}',
+            '#milkviz-seek:hover #milkviz-seek-knob{opacity:1;}',
+            // Control row.
+            '#milkviz-row{display:flex;align-items:center;gap:16px;}',
+            '#milkviz-bar button{border:0;background:transparent;padding:0;cursor:pointer;',
+            'display:flex;align-items:center;justify-content:center;}',
+            '#milkviz-bar button svg{width:24px;height:24px;stroke:#fff;fill:none;',
+            'stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}',
+            '#milkviz-bar button:focus-visible{outline:2px solid #1A73E8;outline-offset:2px;}',
+            // White-on-dark. LightThemeEngine stands down whenever any element is fullscreen
+            // (LightThemeEngine.swift ~877: `fullscreenActive` gates `light`), and this bar is
+            // fullscreen-only, so stylesheet !important suffices — no per-element inline fight
+            // needed. (If QA shows any light bleed, escalate to excluding #milkviz-bar from the
+            // engine's three restyle mechanisms — see the lightthemeengine-three-mechanisms note.)
+            '#milkviz-bar,#milkviz-bar *{color:#fff !important;-webkit-text-fill-color:#fff !important;}',
+            '#milkviz-time{font-size:13px;min-width:88px;white-space:nowrap;}',
+            '#milkviz-meta{display:flex;align-items:center;gap:10px;min-width:0;flex:1;}',
+            '#milkviz-thumb{width:40px;height:40px;border-radius:4px;object-fit:cover;flex:none;}',
+            '#milkviz-title{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+            // Volume: slider collapsed to 0 width, expands on hover/focus (YT-style).
+            '#milkviz-vol-wrap{display:flex;align-items:center;gap:6px;flex:none;}',
+            '#milkviz-vol-slider{width:0;opacity:0;height:4px;accent-color:#fff;cursor:pointer;',
+            'transition:width .18s ease, opacity .18s ease;}',
+            '#milkviz-vol-wrap:hover #milkviz-vol-slider,#milkviz-vol-slider:focus-visible{width:72px;opacity:1;}',
+            '#milkviz-preset{display:flex;align-items:center;gap:6px;flex:none;}',
+            '#milkviz-preset-name{font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;',
+            'white-space:nowrap;opacity:.85;}',
+            // Reduced motion: kill duration AND the visibility delay (else the bar strands
+            // visible for 350ms), drop the slide. Hide behavior itself is preserved.
+            '@media (prefers-reduced-motion: reduce){#milkviz-bar{transition-duration:.01ms;transition-delay:0s;transform:none;}',
+            '#milkviz-bar.visible{transition-duration:.01ms;transition-delay:0s;transform:none;}}',
+        ].join('');
+        document.head.appendChild(css);
+    }
+
+    // Bar element refs (assigned in buildBar, cleared in onGlobalFsChange teardown).
+    let _bar = null, _barPlayBtn = null, _barVolBtn = null, _barVolSlider = null,
+        _barPlayed = null, _barKnob = null, _barTime = null, _barThumb = null, _barTitle = null;
+    let _barVolSliding = false;   // true while dragging the volume slider (don't fight its value)
+
+    // Task 4 fills these in; no-op stubs so Task 3 runs standalone (REASSIGNED, not redeclared).
+    var resolveVideo = function () { return null; };
+    var bindVideo = function () {};
+    var unbindVideo = function () {};
+    var updateBarMeta = function () {};
+
+    function mkBtn(id, label, svg) {
+        const b = document.createElement('button');
+        b.id = id; b.type = 'button';
+        b.setAttribute('aria-label', label); b.title = label;
+        b.innerHTML = svg;
+        return b;
+    }
+
+    function buildBar() {
+        if (_bar || !_canvasHost) return;
+        injectBarCss();
+        const bar = document.createElement('div');
+        bar.id = 'milkviz-bar';
+        bar.setAttribute('role', 'group');
+        bar.setAttribute('aria-label', 'Playback controls');
+
+        const seek = document.createElement('div');
+        seek.id = 'milkviz-seek';
+        seek.setAttribute('role', 'slider'); seek.setAttribute('aria-label', 'Seek');
+        seek.innerHTML = '<div id="milkviz-seek-played"></div><div id="milkviz-seek-knob"></div>';
+
+        const row = document.createElement('div'); row.id = 'milkviz-row';
+        const prev = mkBtn('milkviz-prev', 'Previous', ICON.prev);
+        const play = mkBtn('milkviz-play', 'Play', ICON.play);
+        const next = mkBtn('milkviz-next', 'Next', ICON.next);
+        const time = document.createElement('div'); time.id = 'milkviz-time'; time.textContent = '0:00 / 0:00';
+
+        const meta = document.createElement('div'); meta.id = 'milkviz-meta';
+        const thumb = document.createElement('img'); thumb.id = 'milkviz-thumb'; thumb.alt = '';
+        const title = document.createElement('div'); title.id = 'milkviz-title';
+        meta.appendChild(thumb); meta.appendChild(title);
+
+        // Volume: icon (mute toggle) + slider that expands on hover, matching YT's video bar.
+        const volWrap = document.createElement('div'); volWrap.id = 'milkviz-vol-wrap';
+        const vol = mkBtn('milkviz-vol', 'Mute', ICON.vol);
+        const volSlider = document.createElement('input');
+        volSlider.id = 'milkviz-vol-slider'; volSlider.type = 'range';
+        volSlider.min = '0'; volSlider.max = '1'; volSlider.step = '0.01'; volSlider.value = '1';
+        volSlider.setAttribute('aria-label', 'Volume');
+        volWrap.appendChild(vol); volWrap.appendChild(volSlider);
+
+        const preset = document.createElement('div'); preset.id = 'milkviz-preset';
+        const pPrev = mkBtn('milkviz-preset-prev', 'Previous preset', ICON.presetPrev);
+        const pName = document.createElement('div'); pName.id = 'milkviz-preset-name';
+        pName.setAttribute('aria-live', 'polite');
+        const pNext = mkBtn('milkviz-preset-next', 'Next preset', ICON.presetNext);
+        preset.appendChild(pPrev); preset.appendChild(pName); preset.appendChild(pNext);
+
+        const exit = mkBtn('milkviz-exit', 'Exit fullscreen', ICON.exitFs);
+        exit.addEventListener('click', function (e) { e.stopPropagation(); exitFs(); });
+
+        row.appendChild(prev); row.appendChild(play); row.appendChild(next);
+        row.appendChild(time); row.appendChild(meta); row.appendChild(volWrap);
+        row.appendChild(preset); row.appendChild(exit);
+        bar.appendChild(seek); bar.appendChild(row);
+
+        bar.addEventListener('pointerenter', function () { if (_idle) _idle.setLock('hover', true); });
+        bar.addEventListener('pointerleave', function () { if (_idle) _idle.setLock('hover', false); });
+        bar.addEventListener('focusin', function () { if (_idle) { _idle.reveal(); _idle.setLock('focus', true); } });
+        bar.addEventListener('focusout', function (e) {
+            if (_idle && !bar.contains(e.relatedTarget)) _idle.setLock('focus', false);
+        });
+
+        _canvasHost.appendChild(bar);   // sibling of the canvas; NOT inside it
+
+        _bar = bar; _barPlayBtn = play; _barVolBtn = vol; _barVolSlider = volSlider;
+        _barPlayed = bar.querySelector('#milkviz-seek-played');
+        _barKnob = bar.querySelector('#milkviz-seek-knob');
+        _barTime = time; _barThumb = thumb; _barTitle = title;
+        _barPresetLabel = pName;
+    }
+
+    // Real implementation — REASSIGN the Task 2 var (do not redeclare; `_barPresetLabel`
+    // and `var setBarPresetLabel` already exist from Task 2).
+    setBarPresetLabel = function (name) {
+        if (!_barPresetLabel) return;
+        _barPresetLabel.textContent = name || '';
+        _barPresetLabel.title = name || '';
+    };
+
+    // Idle controller + activity listeners.
+    let _idle = null, _idleListeners = null;
+
+    function applyVisualizerReveal(show) {
+        if (!_bar) return;
+        _bar.classList.toggle('visible', show);
+        if (_canvasHost) _canvasHost.style.cursor = show ? 'auto' : 'none';
+    }
+
+    // Peek zone: bottom 15% of the host counts as activity even before reaching the bar.
+    function inPeekZone(e) {
+        if (!_canvasHost) return false;
+        const r = _canvasHost.getBoundingClientRect();
+        return e.clientY >= r.bottom - r.height * 0.15;
+    }
+
+    function startIdle(onShow, onHide) {
+        stopIdle();
+        _idle = window.MilkVizCtl.createIdleController({ onShow: onShow, onHide: onHide });
+
+        const onMove = function (e) {
+            if (inPeekZone(e)) _idle.reveal(); else _idle.activity(e.clientX, e.clientY);
+        };
+        const onDown = function () { _idle.reveal(); };
+        const onFocus = function () { _idle.reveal(); };
+        const onKey = function (e) {
+            if (['ArrowLeft','ArrowRight',' ','k','m','f','Escape'].indexOf(e.key) !== -1) _idle.reveal();
+        };
+        const onScrubEnd = function () { _idle.setLock('scrub', false); };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('pointerdown', onDown);
+        document.addEventListener('focusin', onFocus);
+        document.addEventListener('keydown', onKey);
+        window.addEventListener('pointerup', onScrubEnd);
+        window.addEventListener('pointercancel', onScrubEnd);
+        window.addEventListener('lostpointercapture', onScrubEnd);
+        window.addEventListener('blur', onScrubEnd);
+        _idleListeners = { onMove, onDown, onFocus, onKey, onScrubEnd };
+        _idle.reveal();   // controls visible on entry, then auto-hide after the idle timeout
+    }
+
+    function stopIdle() {
+        if (_idleListeners) {
+            const l = _idleListeners;
+            document.removeEventListener('mousemove', l.onMove);
+            document.removeEventListener('pointerdown', l.onDown);
+            document.removeEventListener('focusin', l.onFocus);
+            document.removeEventListener('keydown', l.onKey);
+            window.removeEventListener('pointerup', l.onScrubEnd);
+            window.removeEventListener('pointercancel', l.onScrubEnd);
+            window.removeEventListener('lostpointercapture', l.onScrubEnd);
+            window.removeEventListener('blur', l.onScrubEnd);
+            _idleListeners = null;
+        }
+        if (_idle) { _idle.destroy(); _idle = null; }
+        if (_canvasHost) _canvasHost.style.cursor = 'auto';
     }
 
     // Called by native (in response to the fs button's 'enterFullscreen' message) so the
@@ -1004,16 +1227,15 @@
         _fsBtn = btn;
 
         _fsChangeHandler = function () {
-            const inFs = document.fullscreenElement === _canvasHost;
+            const inFs = isVizFullscreen();
             if (_canvasHost) {
-                // In fullscreen: edge-to-edge immersive — drop the breathing-room padding and
-                // use a true black backdrop (no light-theme page bg bleeding into fullscreen).
-                // Inline so it beats the page-bg the host carries from the windowed state.
                 _canvasHost.style.padding = inFs ? '0' : '24px';
                 _canvasHost.style.background = inFs ? '#000' : pageBgColor();
             }
             applySize();
             if (_fsBtn) {
+                // Top-right FS button hides in fullscreen (exit lives in the bar); shows when windowed.
+                _fsBtn.style.display = inFs ? 'none' : '';
                 _fsBtn.title = inFs ? 'Exit fullscreen' : 'Enter fullscreen';
                 _fsBtn.setAttribute('aria-label', _fsBtn.title);
             }
@@ -1031,6 +1253,10 @@
             document.removeEventListener('webkitfullscreenchange', _fsChangeHandler);
             _fsChangeHandler = null;
         }
+        stopIdle();
+        if (_bar) { _bar.remove(); _bar = null; _barPresetLabel = null; }
+        document.documentElement.classList.remove('milkviz-idle');   // belt-and-braces (video adapter)
+        _activeAdapter = null;   // reset the global handler's state so a later fs re-fires cleanly
         if (_fsBtn) { _fsBtn.remove(); _fsBtn = null; }
         if (_fsGradient) { _fsGradient.remove(); _fsGradient = null; }
     }
@@ -1074,6 +1300,50 @@
         if (page) obs.observe(page, { attributes: true });
     }
 
+    // --- Task 3: Single global fullscreen handler (sole owner of adapter selection + bar + idle) ---
+
+    let _activeAdapter = null;   // 'viz' | 'video' | null — exactly one idle owner at a time
+    let _globalFsBound = false;
+
+    function onGlobalFsChange() {
+        const fe = document.fullscreenElement || document.webkitFullscreenElement;
+        let want = !fe ? null : (isVizFullscreen() ? 'viz' : 'video');
+        // Guard the teardown race: removeFullscreenControl() may exit fullscreen (async) and null
+        // _activeAdapter while _canvasHost still momentarily exists. If the visualizer is no longer
+        // active, never (re)build the viz adapter on a late fullscreenchange.
+        if (want === 'viz' && !_active) want = null;
+        if (want === _activeAdapter) return;   // idempotent: ignore no-op re-fires
+
+        // Tear down whatever adapter was active.
+        if (_activeAdapter === 'viz') {
+            stopIdle();
+            unbindVideo();                                   // no-op until Task 4 defines it
+            if (_bar) { _bar.remove(); _bar = null; _barPresetLabel = null; }
+        } else if (_activeAdapter === 'video') {
+            stopIdle();
+            document.documentElement.classList.remove('milkviz-idle');
+        }
+        _activeAdapter = want;
+
+        // Start the newly-selected adapter.
+        if (want === 'viz') {
+            buildBar();
+            startIdle(function () { applyVisualizerReveal(true); },
+                      function () { applyVisualizerReveal(false); });
+            bindVideo(resolveVideo());                       // no-ops until Task 4 defines them
+            updateBarMeta();
+            if (_presetNames.length) setBarPresetLabel(_presetNames[_presetIdx]);
+        }
+        // want === 'video' branch is added in Task 5.
+    }
+
+    function bindGlobalFs() {
+        if (_globalFsBound) return;
+        _globalFsBound = true;
+        document.addEventListener('fullscreenchange', onGlobalFsChange);
+        document.addEventListener('webkitfullscreenchange', onGlobalFsChange);
+    }
+
     // Boot the segment observer. Gated on __ytmVizSupported AND being on a YT Music page.
     function startSegObserver() {
         if (!window.__ytmVizSupported) {
@@ -1088,6 +1358,7 @@
             console.log('MilkViz: not a YT Music page (' + location.hostname + ') — skipping injection');
             return;
         }
+        bindGlobalFs();
 
         // Attempt injection immediately (page may already have the control).
         scheduleInjectCheck();
