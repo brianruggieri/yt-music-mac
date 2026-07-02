@@ -23,6 +23,19 @@ export function transform(root, fake) {
   const nextPlaylist = dealer(fake.playlists);
   const np = fake.nowPlaying;
 
+  // original -> fake name pairs collected while rewriting visible runs. A final pass
+  // rewrites accessibility `label`s that embed the ORIGINAL names ("Play <title> - <artist>")
+  // — the runs got faked but aria labels are separate strings, and leaving them leaks the
+  // real content names into the DOM. Only labels are touched, so structural ones the test
+  // openers rely on ("Action menu") survive.
+  const renames = new Map();
+  function rename(orig, fk) {
+    if (typeof orig === 'string' && orig.length > 2 && orig !== fk) renames.set(orig, fk);
+  }
+  function firstRun(textObj) {
+    return (textObj && Array.isArray(textObj.runs) && textObj.runs[0] && textObj.runs[0].text) || null;
+  }
+
   function rewriteThumbs(node, sentinel) {
     if (node && Array.isArray(node.thumbnails)) {
       for (const t of node.thumbnails) if (t && typeof t.url === 'string') t.url = sentinel;
@@ -62,9 +75,14 @@ export function transform(root, fake) {
       const r = node.musicResponsiveListItemRenderer, s = nextSong();
       const fc = r.flexColumns || [];
       const col = (i) => fc[i] && fc[i].musicResponsiveListItemFlexColumnRenderer;
+      // record originals (title + every artist run) for the aria-label scrub
+      if (col(0)) rename(firstRun(col(0).text), s.title);
+      if (col(1) && col(1).text && Array.isArray(col(1).text.runs)) {
+        for (const run of col(1).text.runs) if (!isSep(run.text)) rename(run.text, s.artist);
+      }
       if (col(0)) setText(col(0).text, s.title);
       if (col(1)) setText(col(1).text, `${s.artist} • ${s.views}`);
-      if (col(2)) setText(col(2).text, s.album);
+      if (col(2)) { rename(firstRun(col(2).text), s.album); setText(col(2).text, s.album); }
       // trailing duration column, when present
       const fx = r.fixedColumns && r.fixedColumns[0] && r.fixedColumns[0].musicResponsiveListItemFixedColumnRenderer;
       if (fx) setText(fx.text, s.durationText);
@@ -72,16 +90,54 @@ export function transform(root, fake) {
     }
     if (node.musicTwoRowItemRenderer) {
       const r = node.musicTwoRowItemRenderer;
+      const orig = firstRun(r.title);
       const sub0 = r.subtitle && r.subtitle.runs && r.subtitle.runs[0] && r.subtitle.runs[0].text || '';
       // aspectRatio is the reliable card-type signal: 16:9 = video, SQUARE = album/playlist/artist.
       const is169 = /16_9/.test(r.aspectRatio || '');
-      if (is169) { const s = nextSong(); setText(r.title, s.title); setText(r.subtitle, `${s.artist} • ${s.views}`); setThumb(r, `${ASSET}/video/${slug(s.title)}.png`); }
-      else if (/playlist/i.test(sub0)) { const p = nextPlaylist(); setText(r.title, p); setText(r.subtitle, `Playlist • ${fake.profile.name}`); setThumb(r, `${ASSET}/playlist/${slug(p)}.png`); }
-      else if (/artist|subscriber/i.test(sub0)) { const a = nextArtist(); setText(r.title, a); setText(r.subtitle, 'Artist'); setThumb(r, `${ASSET}/artist/${slug(a)}.png`); }
-      else { const a = nextAlbum(); setText(r.title, a.title); setText(r.subtitle, a.subtitle); setThumb(r, `${ASSET}/album/${slug(a.title)}.png`); }
+      let fakeTitle;
+      if (is169) { const s = nextSong(); fakeTitle = s.title; setText(r.title, s.title); setText(r.subtitle, `${s.artist} • ${s.views}`); setThumb(r, `${ASSET}/video/${slug(s.title)}.png`); }
+      else if (/playlist/i.test(sub0)) { const p = nextPlaylist(); fakeTitle = p; setText(r.title, p); setText(r.subtitle, `Playlist • ${fake.profile.name}`); setThumb(r, `${ASSET}/playlist/${slug(p)}.png`); }
+      else if (/artist|subscriber/i.test(sub0)) { const a = nextArtist(); fakeTitle = a; setText(r.title, a); setText(r.subtitle, 'Artist'); setThumb(r, `${ASSET}/artist/${slug(a)}.png`); }
+      else { const a = nextAlbum(); fakeTitle = a.title; setText(r.title, a.title); setText(r.subtitle, a.subtitle); setThumb(r, `${ASSET}/album/${slug(a.title)}.png`); }
+      rename(orig, fakeTitle);
+      // Card aria labels can embed the whole EPISODE DESCRIPTION (news/podcast cards) — real
+      // third-party content the rename pass can't know. Overwrite content labels in this card
+      // (contains the original title, or long = descriptive); short structural labels
+      // ("Action menu") survive.
+      (function fixL(n) {
+        if (!n || typeof n !== 'object') return;
+        for (const k in n) {
+          if (k === 'label' && typeof n[k] === 'string') {
+            if ((orig && n[k].includes(orig)) || n[k].length > 60) n[k] = fakeTitle;
+          } else fixL(n[k]);
+        }
+      })(r);
+    }
+    // Podcast/news EPISODE cards (explore): title + subtitle + a full episode DESCRIPTION,
+    // all real third-party content, echoed again into play/pause aria labels.
+    if (node.musicMultiRowListItemRenderer) {
+      const r = node.musicMultiRowListItemRenderer, s = nextSong();
+      const orig = firstRun(r.title);
+      rename(orig, s.title);
+      setText(r.title, s.title);
+      setText(r.subtitle, `${s.artist} • Episode`);
+      setText(r.description, 'A weekly session of new discoveries, deep cuts, and conversation from the studio.');
+      setThumb(r, `${ASSET}/video/${slug(s.title)}.png`);
+      (function fixL(n) {
+        if (!n || typeof n !== 'object') return;
+        for (const k in n) {
+          if (k === 'label' && typeof n[k] === 'string') {
+            if ((orig && n[k].includes(orig)) || n[k].length > 60) n[k] = s.title;
+          } else fixL(n[k]);
+        }
+      })(r);
     }
     if (node.playlistPanelVideoRenderer) {
       const r = node.playlistPanelVideoRenderer, s = nextSong();
+      rename(firstRun(r.title), s.title);
+      if (r.longBylineText && Array.isArray(r.longBylineText.runs)) {
+        for (const run of r.longBylineText.runs) if (!isSep(run.text)) rename(run.text, s.artist);
+      }
       setText(r.title, s.title);
       setText(r.longBylineText, `${s.artist} • ${s.album} • 2024`);
       setText(r.lengthText, s.durationText);
@@ -97,6 +153,11 @@ export function transform(root, fake) {
     }
     // storyboard scrubber sprite (non-visual seek preview) carries a real videoId URL — blank it
     if (node.playerStoryboardSpecRenderer) node.playerStoryboardSpecRenderer.spec = '';
+    // Per-item play/pause a11y labels embed the FULL real title ("Play VIDEO OF …"). The
+    // rename map can miss these (escaping/truncation differences), so genericize wholesale —
+    // they're per-item play buttons; nothing in the tests or openers keys on them.
+    if (node.accessibilityPlayData && node.accessibilityPlayData.accessibilityData) node.accessibilityPlayData.accessibilityData.label = 'Play';
+    if (node.accessibilityPauseData && node.accessibilityPauseData.accessibilityData) node.accessibilityPauseData.accessibilityData.label = 'Pause';
     if (node.microformatDataRenderer) {
       const m = node.microformatDataRenderer;
       if ('title' in m) m.title = `${np.title} - ${np.artist}`;
@@ -123,13 +184,110 @@ export function transform(root, fake) {
         for (const k in n) fix(n[k]);
       })(H);
     }
+    // --- detail-page headers ---
+    // Album + playlist detail pages: musicResponsiveHeaderRenderer (title, subtitle,
+    // strapline = artist/owner line, secondSubtitle = "N songs • length", big art).
+    // Branch playlist-vs-album off the subtitle text, same signal as the two-row cards.
+    if (node.musicResponsiveHeaderRenderer) {
+      const h = node.musicResponsiveHeaderRenderer;
+      const subText = (h.subtitle && h.subtitle.runs || []).map((r) => r.text).join('');
+      if (/playlist/i.test(subText)) {
+        const p = nextPlaylist();
+        rename(firstRun(h.title), p);
+        rename(firstRun(h.straplineTextOne), fake.profile.name);
+        setText(h.title, p);
+        setText(h.straplineTextOne, fake.profile.name);
+        setThumb(h.thumbnail, `${ASSET}/playlist/${slug(p)}.png`);
+        if (h.straplineThumbnail) setThumb(h.straplineThumbnail, `${ASSET}/avatar.png`);
+      } else {
+        const a = nextAlbum();
+        rename(firstRun(h.title), a.title);
+        rename(firstRun(h.straplineTextOne), a.artist);
+        setText(h.title, a.title);
+        setText(h.straplineTextOne, a.artist);
+        setThumb(h.thumbnail, `${ASSET}/album/${slug(a.title)}.png`);
+        if (h.straplineThumbnail) setThumb(h.straplineThumbnail, `${ASSET}/artist/${slug(a.artist)}.png`);
+      }
+      if (h.secondSubtitle) setText(h.secondSubtitle, '12 songs • 42 minutes');
+      if (h.description) setText(h.description, 'A hand-picked collection for late nights and long drives.');
+    }
+    // Artist detail page: musicImmersiveHeaderRenderer (name, bio, listener count, hero photo).
+    // The captured description is the REAL artist's public bio — must be replaced.
+    if (node.musicImmersiveHeaderRenderer) {
+      const h = node.musicImmersiveHeaderRenderer, a = nextArtist();
+      rename(firstRun(h.title), a);
+      setText(h.title, a);
+      setText(h.description, `${a} is an independent recording artist. Blending analog warmth with modern production, their releases have quietly built a devoted following.`);
+      if (h.monthlyListenerCount) setText(h.monthlyListenerCount, '2.1M monthly listeners');
+      setThumb(h.thumbnail, `${ASSET}/artist/${slug(a)}.png`);
+    }
+    // Search top-result card (musicCardShelfRenderer): title is the real entity name.
+    if (node.musicCardShelfRenderer) {
+      const c = node.musicCardShelfRenderer, a = nextArtist();
+      rename(firstRun(c.title), a);
+      setText(c.title, a);
+      setText(c.subtitle, 'Artist • 2.1M subscribers');
+      setThumb(c.thumbnail, `${ASSET}/artist/${slug(a)}.png`);
+    }
+    // Artist About section (musicDescriptionShelfRenderer): the full real-world bio.
+    if (node.musicDescriptionShelfRenderer) {
+      const d = node.musicDescriptionShelfRenderer;
+      setText(d.description, 'An independent recording artist blending analog warmth with modern production. Their releases have quietly built a devoted following across late-night radio and festival stages alike.');
+      if (d.header) setText(d.header, 'About');
+    }
+    // Plain-STRING description fields (SEO/share text variants — not runs): real content
+    // sentences about the real entity; replace wholesale rather than name-patching.
+    if (typeof node.description === 'string' && node.description.length > 20) {
+      node.description = 'A hand-picked collection for late nights and long drives.';
+    }
+    // Add-to-playlist dialog options: each row is one of the user's REAL playlists.
+    if (node.playlistAddToOptionRenderer) {
+      const r = node.playlistAddToOptionRenderer, p = nextPlaylist();
+      rename(firstRun(r.title), p);
+      setText(r.title, p);
+      if (r.shortBylineText) setText(r.shortBylineText, fake.profile.name);
+    }
+    // Share panel: the copy-link URL carries a per-share `si=` tracking token tied to the
+    // account — strip it (keep the plain watch URL; videoIds stay, same policy as elsewhere).
+    if (node.copyLinkRenderer && typeof node.copyLinkRenderer.shortUrl === 'string') {
+      node.copyLinkRenderer.shortUrl = node.copyLinkRenderer.shortUrl.replace(/[?&]si=[^&]+/, '');
+    }
     // --- search suggestions / history (would leak real search history) ---
     if (node.searchSuggestionRenderer) setText(node.searchSuggestionRenderer.suggestion, nextArtist());
     if (node.historySuggestionRenderer) setText(node.historySuggestionRenderer.suggestion, nextArtist());
     // --- sidebar playlists (guide): only user playlists (no icon), never the Home/Explore/Library tabs ---
     if (node.guideEntryRenderer && !node.guideEntryRenderer.icon) {
-      setText(node.guideEntryRenderer.formattedTitle, nextPlaylist());
-      if (node.guideEntryRenderer.formattedSubtitle) setText(node.guideEntryRenderer.formattedSubtitle, fake.profile.name);
+      const g = node.guideEntryRenderer, p = nextPlaylist();
+      rename(firstRun(g.formattedTitle), p);   // aria label carries the real playlist name too
+      setText(g.formattedTitle, p);
+      if (g.formattedSubtitle) setText(g.formattedSubtitle, fake.profile.name);
+    }
+    // Third-party share targets (Facebook/X/Pinterest buttons): their hrefs embed the
+    // percent-ENCODED real title + an i.ytimg media URL — invisible but real content the
+    // rename pass can't match. The links aren't exercised by tests; point them at the sentinel.
+    if (node.shareTargetRenderer) {
+      (function fixU(n) {
+        if (!n || typeof n !== 'object') return;
+        for (const k of Object.keys(n)) {
+          if (k === 'url' && typeof n[k] === 'string') n[k] = 'https://fixture.invalid/share';
+          else fixU(n[k]);
+        }
+      })(node.shareTargetRenderer);
+    }
+    // Channel vanity URL ("/@RealHandle") rides in browseEndpoints (account menu et al).
+    if (typeof node.canonicalBaseUrl === 'string') node.canonicalBaseUrl = `/${fake.profile.handle}`;
+    // Newer ViewModel owner attribution (playlist header): {avatarStackViewModel: {text:
+    // {content: "Real Name"}}}, with the same name echoed into accessibilityContext labels.
+    if (node.avatarStackViewModel) {
+      const av = node.avatarStackViewModel;
+      if (av.text && typeof av.text.content === 'string') av.text.content = fake.profile.name;
+      (function fixL(n) {
+        if (!n || typeof n !== 'object') return;
+        for (const k in n) {
+          if (k === 'label' && typeof n[k] === 'string') n[k] = fake.profile.name;
+          else fixL(n[k]);
+        }
+      })(av);
     }
 
     // --- generic thumbnail scrub: any REAL (un-rewritten) thumbnail -> black square. Skip
@@ -140,10 +298,57 @@ export function transform(root, fake) {
       if (Array.isArray(th.thumbnails) && th.thumbnails.some(t => t && t.url && !/fixture\.invalid/.test(t.url))) rewriteThumbs(th, ART_SENTINEL);
     }
     if (Array.isArray(node.thumbnails) && node.thumbnails.some(t => t && t.url && !/fixture\.invalid/.test(t.url))) rewriteThumbs(node, ART_SENTINEL);
+    // Newer ViewModel shape (avatarViewModel etc.) carries image.sources[].url instead of
+    // thumbnails[] — same scrub: owner avatars -> the fake avatar, any other stray -> black.
+    if (node.avatarViewModel && node.avatarViewModel.image) {
+      for (const s of node.avatarViewModel.image.sources || []) if (s && typeof s.url === 'string') s.url = `${ASSET}/avatar.png`;
+    }
+    if (Array.isArray(node.sources) && node.sources.some(s => s && typeof s.url === 'string' && /^https?:\/\//.test(s.url) && !/fixture\.invalid/.test(s.url))) {
+      for (const s of node.sources) if (s && typeof s.url === 'string') s.url = ART_SENTINEL;
+    }
 
     for (const k in node) visit(node[k]);
   }
 
   visit(root);
+
+  // Final pass: rewrite ANY remaining string that embeds an original content name — aria
+  // labels ("Play Veridis Quo - Daft Punk"), shelf titles ("Playlists by Daft Punk"), share
+  // text, etc. Longest originals first so a longer name containing a shorter one
+  // ("X Essentials" vs "X") is replaced whole, not partially. Opaque tokens
+  // (trackingParams/base64) can't contain the names, so a blanket string pass is safe;
+  // structural labels ("Action menu") contain no content names and survive untouched.
+  // Compile a word-BOUNDARY matcher per pair: a short real name ("River") must not corrupt a
+  // fake value that merely contains it ("Alex Rivera" -> "Alex Afterglowa"). Match only when
+  // the original is bounded by non-letter/digit (or string edges), across unicode. Longest
+  // first so a longer name containing a shorter one is replaced whole.
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pairs = [...renames.entries()]
+    .sort((a, b) => b[0].length - a[0].length)
+    .map(([o, f]) => [new RegExp(`(?<![\\p{L}\\p{N}])${esc(o)}(?![\\p{L}\\p{N}])`, 'gu'), f]);
+  // Blanket account-identity scrub, applied alongside the renames: any string embedding an
+  // email address (e.g. the settings sign-out confirm "Name (user@gmail.com)") becomes the
+  // fake identity — content-independent, so it works even where no rename was recorded.
+  const EMAIL_LINE = /\S+@\S+\.\S+/;
+  const fixStr = (s) => {
+    for (const [re, f] of pairs) if (re.test(s)) s = s.replace(re, f);
+    if (EMAIL_LINE.test(s)) s = `${fake.profile.name} (${fake.profile.email})`;
+    return s;
+  };
+  (function scrub(n) {
+    if (Array.isArray(n)) {
+      for (let i = 0; i < n.length; i++) {
+        if (typeof n[i] === 'string') n[i] = fixStr(n[i]);
+        else scrub(n[i]);
+      }
+      return;
+    }
+    if (!n || typeof n !== 'object') return;
+    for (const k in n) {
+      if (typeof n[k] === 'string') n[k] = fixStr(n[k]);
+      else scrub(n[k]);
+    }
+  })(root);
+
   return root;
 }

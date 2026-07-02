@@ -14,6 +14,10 @@ fs.mkdirSync(OUT, { recursive: true });
 const MAP = {
   'browse-home.json': 'browse-home', 'browse-explore.json': 'browse-explore',
   'browse-moods.json': 'browse-moods', 'browse-library.json': 'browse-library',
+  'browse-album.json': 'browse-album', 'browse-playlist.json': 'browse-playlist',
+  'browse-artist.json': 'browse-artist',
+  'playlist_get_add_to_playlist.json': 'add-to-playlist', 'share_get_share_panel.json': 'share-panel',
+  'account_get_setting.json': 'settings',
   'next.json': 'next', 'player.json': 'player', 'account_menu.json': 'account_menu',
   'guide.json': 'guide', 'search-search.json': 'search',
   'search-music_get_search_suggestions.json': 'search-suggestions',
@@ -44,9 +48,15 @@ for (const [cap, name] of Object.entries(MAP)) {
   const b = JSON.stringify(transform(JSON.parse(rec.res), fake));
   if (a !== b) { console.log(`✗ ${name}: NON-DETERMINISTIC`); continue; }
   const out = transform(body, fake);
-  fs.writeFileSync(`${OUT}/${name}.json`, JSON.stringify(out));
+  // Belt-and-braces host sweep: the walker handles every KNOWN thumbnail shape, but YT keeps
+  // minting new ones (avatarViewModel.sources, share-panel maxresdefault, ...). Any real-host
+  // URL that survives to here is a leak by definition — string-replace it with the sentinel.
+  let json = JSON.stringify(out);
+  const swept = (json.match(/https:\/\/[^"\\]*(ytimg\.com|googleusercontent\.com|ggpht\.com|gstatic\.com)[^"\\]*/g) || []).length;
+  if (swept) json = json.replace(/https:\/\/[^"\\]*(ytimg\.com|googleusercontent\.com|ggpht\.com|gstatic\.com)[^"\\]*/g, 'https://fixture.invalid/art.png');
+  fs.writeFileSync(`${OUT}/${name}.json`, json);
   const titles = sampleTitles(out);
-  console.log(`✓ ${name}  ${(a.length/1024|0)}KB  sample: ${titles.slice(0,4).join(' | ') || '(no item renderers)'}`);
+  console.log(`✓ ${name}  ${(a.length/1024|0)}KB${swept ? `  [swept ${swept} residual host url(s)]` : ''}  sample: ${titles.slice(0,4).join(' | ') || '(no item renderers)'}`);
   ok++;
 }
 console.log(`\nBuilt ${ok}/${Object.keys(MAP).length} fixtures → ${OUT}/`);

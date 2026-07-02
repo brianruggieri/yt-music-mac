@@ -15,6 +15,16 @@ const browseMap = {
   FEmusic_home: 'browse-home', FEmusic_explore: 'browse-explore',
   FEmusic_moods_and_genres: 'browse-moods', FEmusic_library_landing: 'browse-library',
 };
+// Detail pages: browseId is per-entity, so map by PREFIX (any album/playlist/artist detail
+// request gets the corresponding fake detail fixture).
+function browseFile(browseId) {
+  if (!browseId) return null;
+  if (browseMap[browseId]) return browseMap[browseId];
+  if (browseId.startsWith('MPREb_')) return 'browse-album';
+  if (browseId.startsWith('VL')) return 'browse-playlist';
+  if (browseId.startsWith('UC')) return 'browse-artist';
+  return null;
+}
 
 function readBrowseId(req) {
   try {
@@ -30,13 +40,16 @@ export async function installFixture(context) {
   await context.route(/youtubei\/v1\//, async (route) => {
     const ep = new URL(route.request().url()).pathname.replace(/^\/youtubei\/v1\//, '');
     let file = null;
-    if (ep === 'browse') file = browseMap[readBrowseId(route.request())] || 'browse-home';
+    if (ep === 'browse') file = browseFile(readBrowseId(route.request())) || 'browse-home';
     else if (ep === 'search') file = 'search';
     else if (ep === 'music/get_search_suggestions') file = 'search-suggestions';
     else if (ep === 'next') file = 'next';
     else if (ep === 'player') file = 'player';
     else if (ep === 'account/account_menu') file = 'account_menu';
     else if (ep === 'guide') file = 'guide';
+    else if (ep === 'playlist/get_add_to_playlist') file = 'add-to-playlist';
+    else if (ep === 'share/get_share_panel') file = 'share-panel';
+    else if (ep === 'account/get_setting') file = 'settings';
     if (!file || !fs.existsSync(dataFile(file))) return route.continue();
     return route.fulfill({ status: 200, contentType: 'application/json', body: load(file) });
   });
@@ -63,7 +76,7 @@ export async function installFixture(context) {
   // surface via the browse/guide XHR — which the youtubei route above serves as fake.
   // Deterministic, and no fragile in-page hydration hooking. Scoped to the SPA document
   // routes (never youtubei), and only rewrites the main-frame document.
-  await context.route(/music\.youtube\.com\/(explore|library|moods_and_genres|search|$|\?)/, async (route) => {
+  await context.route(/music\.youtube\.com\/(explore|library|moods_and_genres|search|settings|browse\/|playlist\?|channel\/|$|\?)/, async (route) => {
     if (route.request().resourceType() !== 'document') return route.fallback();
     const resp = await route.fetch();
     const html = (await resp.text())

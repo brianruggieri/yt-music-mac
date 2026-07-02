@@ -198,8 +198,23 @@ enum LightThemeEngine {
             // stays "selected" next to the Visualizer, and we'd need counter-observers). Gate
             // them off the milkviz-owned toggle; they still theme the plain 2-button control
             // before injection / when the visualizer is unsupported.
-            ['.av-toggle:not(.milkviz-styled)', 'background-color: var(--ytmusic-color-black1)'],
+            // Explicit recessed-grey track (not the --ytmusic-color-black1 token, which the
+            // inversion doesn't always reach on the player PAGE — leaving a dark track that
+            // fails label contrast). #e4e4e4 matches the intended #dedede recessed grey and
+            // makes both segments sit on light, so the dark labels below always read.
+            ['.av-toggle:not(.milkviz-styled)', 'background-color: rgb(228, 228, 228)'],
             ['ytmusic-av-toggle[playback-mode="ATV_PREFERRED"] .av-toggle:not(.milkviz-styled) .song-button.ytmusic-av-toggle, ytmusic-av-toggle[playback-mode="OMV_PREFERRED"] .av-toggle:not(.milkviz-styled) .video-button.ytmusic-av-toggle',
+                'background-color: rgb(255, 255, 255); box-shadow: 0 1px 2px rgba(0,0,0,0.2)'],
+            // Segment BUTTONS on the fallback (non-milkviz) toggle. YT styles the raised pill
+            // and label on the host `.X-button.ytmusic-av-toggle`, but on the player PAGE the
+            // real element is a `<button class="X-button">` the host rules miss — leaving a
+            // dark button bg + white label (white-on-white when unselected, dark-on-dark when
+            // selected; the harness player-page gate caught both). Drive the button directly:
+            // dark label always, transparent by default (shows the grey track)…
+            ['.av-toggle:not(.milkviz-styled) button.song-button, .av-toggle:not(.milkviz-styled) button.video-button',
+                'color: rgb(20, 20, 20); background-color: transparent'],
+            // …and a white raised pill on whichever segment YT's playback-mode marks selected.
+            ['ytmusic-av-toggle[playback-mode="ATV_PREFERRED"] .av-toggle:not(.milkviz-styled) button.song-button, ytmusic-av-toggle[playback-mode="OMV_PREFERRED"] .av-toggle:not(.milkviz-styled) button.video-button',
                 'background-color: rgb(255, 255, 255); box-shadow: 0 1px 2px rgba(0,0,0,0.2)'],
             // Modal scrim (tp-yt-iron-overlay-backdrop — the dimming layer behind every
             // dialog: edit-playlist, add-to-playlist, etc.). YT colours it from an inverted
