@@ -1,0 +1,57 @@
+# Live canary: runs the harness against the REAL music.youtube.com (YTM_LIVE=1), weekly.
+# Purpose: catch YT redesigning their DOM in a way that breaks our light theme — the one
+# thing the frozen-fixture gate can't see. In live mode the pixel screenshots are SKIPPED
+# (real rotating content can't match the fake baselines); the content-independent contrast +
+# state (focus/hover) audits are the signal. A failure here means "YT changed something,
+# investigate" — the fix is usually to re-capture the fixtures and re-baseline the gate.
+#
+# Flakiness is expected (rotating content, missing modal triggers -> those tests skip, not
+# fail). retries:2 (playwright.config) absorbs transient jitter; a persistent contrast
+# failure is the real alert. A scheduled-run failure notifies the repo admins by default.
+name: light-theme canary (live YT)
+
+on:
+  schedule:
+    - cron: '17 13 * * 1'   # Mondays ~13:17 UTC, weekly
+  workflow_dispatch: {}
+
+jobs:
+  canary:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: harness/package-lock.json
+      - run: npm ci
+      - name: Install WebKit
+        run: npx playwright install webkit
+      # Optional logged-in session: set the YTM_AUTH_JSON secret to the contents of a
+      # Playwright storageState file to unlock Home/Library personalization. Without it the
+      # canary still exercises Explore/Search (logged-out) — enough to catch gross redesigns.
+      # NOTE: the session cookie EXPIRES; refresh the secret periodically or use a throwaway
+      # account. (Locally: `npm run import-cookies cookies.json` produces auth.json.)
+      - name: Write logged-in session (if secret present)
+        id: auth
+        env:
+          SESSION: ${{ secrets.YTM_AUTH_JSON }}
+        run: |
+          if [ -n "$SESSION" ]; then printf '%s' "$SESSION" > auth.json; echo "have=1" >> "$GITHUB_OUTPUT"; else echo "have=0" >> "$GITHUB_OUTPUT"; fi
+      - name: Run live canary (contrast + state audits vs real YT)
+        env:
+          YTM_LIVE: '1'
+          YTM_AUTH: ${{ steps.auth.outputs.have == '1' && './auth.json' || '' }}
+        run: npx playwright test
+      - name: Upload canary report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-report
+          path: harness/playwright-report/
+          retention-days: 30

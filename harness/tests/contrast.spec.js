@@ -53,12 +53,15 @@ for (const screen of SCREENS) {
     // Visual snapshot per screen × theme. Content is now frozen by the fixture layer
     // (deterministic fake data + black-square art), so this is a tight pixel gate (0.03: tolerates ~0.01% AA jitter, catches theme breaks ~80%) that
     // catches real theme drift — not the old 0.45 gross-breakage backstop that the live,
-    // rotating content forced. (Run with YTM_LIVE=1 and it loosens conceptually — but the
-    // baselines are the fixture ones, so live is for the audits, not the screenshot gate.)
-    await expect(page).toHaveScreenshot(`${screen.name}-${mode}.png`, {
-      maxDiffPixelRatio: 0.03,
-      animations: 'disabled',
-    });
+    // rotating content forced. Under YTM_LIVE the page shows real, rotating content that
+    // can't match the fake baselines, so skip the pixel gate — the live canary relies on the
+    // content-independent contrast/state audits instead.
+    if (!process.env.YTM_LIVE) {
+      await expect(page).toHaveScreenshot(`${screen.name}-${mode}.png`, {
+        maxDiffPixelRatio: 0.03,
+        animations: 'disabled',
+      });
+    }
 
     // Contrast is only our responsibility in light mode (dark is YT's own).
     if (mode === 'light') {
@@ -84,10 +87,12 @@ for (const ix of INTERACTIONS) {
     }
     await page.waitForTimeout(1200); // let the engine theme the freshly-opened surface
 
-    await expect(page).toHaveScreenshot(`modal-${ix.name}-${mode}.png`, {
-      maxDiffPixelRatio: 0.03,   // tight gate: fixtures freeze the content behind the modal too
-      animations: 'disabled',
-    });
+    if (!process.env.YTM_LIVE) {
+      await expect(page).toHaveScreenshot(`modal-${ix.name}-${mode}.png`, {
+        maxDiffPixelRatio: 0.03,   // tight gate: fixtures freeze the content behind the modal too
+        animations: 'disabled',
+      });
+    }
 
     if (mode === 'light') {
       const failures = (await page.evaluate(auditContrast)).filter((f) => f.kind === 'text' || f.kind === 'icon');

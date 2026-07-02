@@ -66,7 +66,12 @@ export async function installFixture(context) {
   await context.route(/music\.youtube\.com\/(explore|library|moods_and_genres|search|$|\?)/, async (route) => {
     if (route.request().resourceType() !== 'document') return route.fallback();
     const resp = await route.fetch();
-    const html = (await resp.text()).replace("'YTMUSIC_INITIAL_DATA': initialData", "'YTMUSIC_INITIAL_DATA': []");
+    const html = (await resp.text())
+      .replace("'YTMUSIC_INITIAL_DATA': initialData", "'YTMUSIC_INITIAL_DATA': []")
+      // Fake the logged-in flag so the chrome renders the avatar/account UI even with NO real
+      // session (CI runs auth-free). Everything behind it — account_menu, guide, the avatar
+      // image — is already served fake by the routes above, so the identity is Alex Rivera.
+      .replace('"LOGGED_IN":false', '"LOGGED_IN":true');
     return route.fulfill({ response: resp, body: html });
   });
 }
