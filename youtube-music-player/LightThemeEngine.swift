@@ -744,7 +744,7 @@ enum LightThemeEngine {
                 // it styles its own track/buttons in both themes. The auto-border audit used
                 // to stamp inline hairlines on its pill buttons, which the visualizer then had
                 // to chase with a counter-observer — skip the whole control here instead.
-                if (el.closest('ytmusic-av-toggle')) continue;
+                if (el.closest('ytmusic-av-toggle') || el.closest('#milkviz-canvas-host')) continue;
                 const st = getComputedStyle(el);
                 if (st.position === 'absolute' || st.position === 'fixed') continue;   // overlays, not surfaces
                 if ((parseFloat(st.borderTopLeftRadius) || 0) < 4) continue;     // not card-like
@@ -773,7 +773,7 @@ enum LightThemeEngine {
             if (degraded || document.documentElement.getAttribute('data-ytm-mode') !== 'light') return 1;
             let total = 0, failing = 0;
             for (const el of collectText(document.body, [])) {
-                if (el.closest('ytmusic-av-toggle')) continue;   // visualizer-owned control; engine stands down (see scan())
+                if (el.closest('ytmusic-av-toggle') || el.closest('#milkviz-canvas-host')) continue;   // visualizer-owned control; engine stands down (see scan())
                 const st = getComputedStyle(el);
                 if (st.visibility === 'hidden' || st.opacity === '0') continue;
                 const rect = el.getBoundingClientRect();
@@ -863,6 +863,7 @@ enum LightThemeEngine {
                 // !important that OVERRODE the white exception — black play buttons on art.
                 // Stand down and let the static play-button rules win.
                 if (ic.closest('ytmusic-play-button-renderer')) continue;
+                if (ic.closest('#milkviz-canvas-host')) continue;   // visualizer-owned overlay (FS button + bar) sets its own white icons (matches YT media controls)
                 const ir = ic.getBoundingClientRect();
                 if (ir.width < 10 || ir.width > 56 || ir.height < 10 || ir.bottom < 0 || ir.top > innerHeight) continue;
                 const ist = getComputedStyle(ic);
@@ -916,17 +917,61 @@ enum LightThemeEngine {
         // miss light mode until a system toggle. The native value is correct from frame 1;
         // the live media query then takes over for runtime changes.
         const mq = window.matchMedia('(prefers-color-scheme: dark)');
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
         let systemDark = (typeof window.__ytmNativeDark === 'boolean') ? window.__ytmNativeDark : mq.matches;
         // While anything is in element-fullscreen (the visualizer, or YT's own video player),
         // stand the light engine down so fullscreen content renders in YT's native dark —
         // otherwise the inverted player chrome bleeds a light bar into the immersive view.
         let fullscreenActive = false;
-        window.__ytmSetSystemDark = function (d) { systemDark = !!d; applyMode(); pinTokens(); pinNav(); };
-        function applyMode() {
+        window.__ytmSetSystemDark = function (d) { systemDark = !!d; applyMode(true); };   // switchMode runs the pins (correctly, after the flip)
+        // A real toggle (dark<->light) crossfades via the View Transitions API; every
+        // other call (the per-tick re-assert, boot, fullscreen) flips instantly.
+        // pendingMode holds the target of an in-flight transition so a concurrent
+        // no-animate tick can't flip the attribute out from under it (startViewTransition's
+        // update callback runs asynchronously — the flip happens a microtask later).
+        let pendingMode = null;
+        // The full mode switch: leave-light cleanup + the attribute flip + the inline
+        // pins, run SYNCHRONOUSLY here so the View Transition's "new" snapshot is the
+        // fully-resolved frame (the pins otherwise land a tick later, which the frozen
+        // crossfade would show as a half-themed header). The pins are all mode-aware —
+        // each APPLIES its inline value in light and REMOVES it in dark — so running them
+        // in both directions also cleans up the light token/nav pins on the way to dark.
+        function switchMode(next) {
+            pendingMode = null;
+            if (next !== 'light') { clearFixes(); restorePins(); stableAudits = 0; }   // leaving light: drop ALL inline fixes, re-arm audit cadence for re-entry
+            document.documentElement.setAttribute('data-ytm-mode', next);
+            safe(pinTokens); safe(pinNav); safe(pinImmersive); safe(pinMenu); safe(pinLogo);
+        }
+        function applyMode(animate) {
             if (degraded) return;
-            const light = !systemDark && !fullscreenActive;
-            if (!light) { clearFixes(); restorePins(); stableAudits = 0; }   // leaving light: drop ALL inline fixes, re-arm audit cadence for re-entry
-            document.documentElement.setAttribute('data-ytm-mode', light ? 'light' : 'dark');
+            const de = document.documentElement;
+            const next = (!systemDark && !fullscreenActive) ? 'light' : 'dark';
+            if (pendingMode === next) return;                                      // a transition is already flipping to this
+            if (pendingMode === null && de.getAttribute('data-ytm-mode') === next) return;   // already there (the common per-tick case)
+            const prev = de.getAttribute('data-ytm-mode');
+            // Animate only a genuine toggle: prev must be a real prior mode (never at boot,
+            // where prev is null — there's nothing to crossfade from), the API must exist,
+            // motion must be allowed, and the page must be visible (a transition on a hidden
+            // page would fade in from a stale snapshot when it resurfaces).
+            const canAnimate = animate && (prev === 'light' || prev === 'dark')
+                && typeof document.startViewTransition === 'function'
+                && !reduceMotion.matches && document.visibilityState === 'visible';
+            if (!canAnimate) { switchMode(next); return; }
+            pendingMode = next;
+            try {
+                // Mark <html> so the tuned crossfade duration (see the base stylesheet's
+                // `html.ytm-theme-vt::view-transition-*` rule) applies to OUR transition
+                // only — never restyling a view transition some other page code might run.
+                de.classList.add('ytm-theme-vt');
+                const done = () => de.classList.remove('ytm-theme-vt');
+                const vt = document.startViewTransition(() => switchMode(next));
+                // A skipped transition (rapid re-toggle) rejects ready/finished — its update
+                // callback still runs, so just swallow the rejects and always drop the marker.
+                if (vt) {
+                    if (vt.ready && vt.ready.catch) vt.ready.catch(() => {});
+                    if (vt.finished && vt.finished.then) vt.finished.then(done, done); else done();
+                } else { done(); }
+            } catch (e) { de.classList.remove('ytm-theme-vt'); switchMode(next); }   // WKWebView lifecycle edge: fall back to an instant flip
         }
 
         // #nav-bar-background is recolored inline by YT (dark, from page content +
@@ -1132,7 +1177,7 @@ enum LightThemeEngine {
             pending = setTimeout(() => { pending = 0; tick(); }, wait);
         }
 
-        mq.addEventListener('change', () => { systemDark = mq.matches; applyMode(); schedule(); });
+        mq.addEventListener('change', () => { systemDark = mq.matches; applyMode(true); schedule(); });
         // Enter/exit fullscreen flips the engine off/on (same re-apply path as a system
         // appearance change): on exit, applyMode() restores light and schedule() re-themes.
         document.addEventListener('fullscreenchange', () => { fullscreenActive = !!document.fullscreenElement; applyMode(); schedule(); });

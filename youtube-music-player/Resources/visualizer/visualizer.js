@@ -387,8 +387,9 @@
         if (d === _lastDark) return;
         _lastDark = d;
         if (_canvasHost && _active) {
-            _canvasHost.style.background = (document.fullscreenElement === _canvasHost) ? '#000' : pageBgColor();
+            _canvasHost.style.background = isVizFullscreen() ? '#000' : pageBgColor();
         }
+        applyFsChrome();   // re-match the hover overlay gradient + icon to the new theme
         var c = findSegmentContainer();
         if (c && c.classList.contains('milkviz-styled')) { styleSegContainer(c); killButtonBorders(c); }
     }
@@ -792,8 +793,10 @@
         if (!_canvasHost) return;
         const el = document.createElement('div');
         el.textContent = name;
+        // Windowed: sit at the TOP of the visualization (fullscreen routes to the bar label
+        // instead — see announcePreset). left/transform center it horizontally.
         el.style.cssText =
-            'position:absolute;bottom:24px;left:50%;transform:translateX(-50%);' +
+            'position:absolute;top:24px;left:50%;transform:translateX(-50%);' +
             'font-family:sans-serif;font-size:13px;' +
             'padding:4px 12px;border-radius:12px;pointer-events:none;z-index:9999;' +
             'opacity:1;transition:opacity 1s ease;white-space:nowrap;';
@@ -814,13 +817,20 @@
         }, 3100);
     }
 
+    // Route the preset name to the right surface. Fullscreen bar label is wired in Task 4;
+    // until then (and always when windowed) fall back to the top toast.
+    function announcePreset(name) {
+        if (_barPresetLabel && isVizFullscreen()) { setBarPresetLabel(name); return; }
+        showToast(name);
+    }
+
     // Load preset at index i (wrapping), show toast.
     function doLoadPreset(i, blend) {
         if (!_presetsObj || !_presetNames.length || !MilkViz.viz) return;
         _presetIdx = ((i % _presetNames.length) + _presetNames.length) % _presetNames.length;
         const name = _presetNames[_presetIdx];
         MilkViz.viz.loadPreset(_presetsObj[name], blend != null ? blend : 2.7);
-        showToast(name);
+        announcePreset(name);
     }
 
     // Reschedule auto-advance; random interval 18-28s for variety.
@@ -862,6 +872,7 @@
             _lastTrackTitle = title;
             doLoadPreset(_presetIdx + 1, 2.7);
             scheduleCycle();
+            if (isVizFullscreen()) { bindVideo(resolveVideo()); updateBarMeta(); }
         }
     }
 
@@ -902,16 +913,51 @@
     // button in the TOP-RIGHT, both fading in only while the pointer is over the canvas
     // host. Lives on _canvasHost; gradient + button + listener torn down on setActive(false).
 
+    let _barPresetLabel = null;              // the bar's preset-name span (assigned in Task 3)
+    var setBarPresetLabel = function () {};  // no-op until Task 3 reassigns it
+
     let _fsBtn = null;
+    let _credit = null;
     let _fsGradient = null;
     let _fsChangeHandler = null;
 
-    // Standard "enter fullscreen" glyph — four L-shaped corner brackets, white 2px strokes.
+    // Standard "enter fullscreen" glyph — four L-shaped corner brackets. Stroke follows the
+    // button's `color` (white, set inline) so the icon matches YT's white media controls.
     const FS_ICON_SVG =
-        '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#fff" ' +
+        '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" ' +
         'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
         '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>' +
         '</svg>';
+
+    // Same rgb, alpha 0 — so the gradient fades to a transparent version of ITS OWN color
+    // (the `transparent` keyword interpolates through grey in WebKit and would dirty the fade).
+    function _fadeOut(c) {
+        var m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(c);
+        return m ? 'rgba(' + m[1] + ',' + m[2] + ',' + m[3] + ',0)' : 'transparent';
+    }
+
+    // Theme-match the windowed top hover overlay's gradient to YT's video/album-art scrim: fade
+    // from the page background color (off-white in light, near-black in dark) to transparent. The
+    // icon stays white in both themes (see the button's inline style) to match YT's media controls.
+    // Called on create and on every runtime theme swap (reTheme).
+    function applyFsChrome() {
+        if (!_fsGradient) return;
+        var bg = pageBgColor();
+        _fsGradient.style.background = 'linear-gradient(to bottom, ' + bg + ', ' + _fadeOut(bg) + ')';
+    }
+
+    // SVG glyphs for the fullscreen control bar. Stroke style matches FS_ICON_SVG.
+    const ICON = {
+        prev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M20 5l-10 7 10 7z"/></svg>',
+        next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M4 5l10 7-10 7z"/></svg>',
+        play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4l14 8-14 8z" fill="#fff" stroke="none"/></svg>',
+        pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M17 4v16"/></svg>',
+        vol: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9zM16 8a5 5 0 010 8"/></svg>',
+        volMute: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9zM17 9l4 6M21 9l-4 6"/></svg>',
+        presetPrev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+        presetNext: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+        exitFs: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M4 15h5v5M15 20v-5h5"/></svg>',
+    };
 
     // Hover reveal via CSS so it tracks the real pointer state on the fixed host.
     // !important beats the elements' inline opacity:0.
@@ -923,17 +969,488 @@
             '#milkviz-canvas-host:hover #milkviz-fs-gradient{opacity:1 !important;}',
             '#milkviz-canvas-host:hover #milkviz-fs-btn{opacity:0.9 !important;}',
             '#milkviz-fs-btn:hover{opacity:1 !important;}',
+            '#milkviz-canvas-host:hover #milkviz-credit{opacity:0.55 !important;}',
+            '#milkviz-credit:hover{opacity:0.95 !important;}',
         ].join('');
         document.head.appendChild(css);
+    }
+
+    // --- Task 3: Fullscreen control bar DOM, CSS, and idle reveal/hide ---
+
+    function injectBarCss() {
+        if (document.getElementById('milkviz-bar-css')) return;
+        const css = document.createElement('style');
+        css.id = 'milkviz-bar-css';
+        css.textContent = [
+            // Scrim + bar container. Hidden by default (opacity 0 + slide down); .visible reveals.
+            '#milkviz-bar{position:absolute;left:0;right:0;bottom:0;z-index:5;',
+            'padding:28px 24px 16px;box-sizing:border-box;pointer-events:auto;',
+            'background:linear-gradient(to top,rgba(0,0,0,.75) 0%,rgba(0,0,0,.55) 28%,rgba(0,0,0,0) 100%);',
+            'opacity:0;transform:translateY(10px);visibility:hidden;',
+            // Delay the visibility:hidden flip until AFTER the opacity/transform fade (0s @ .35s),
+            // so the bar actually fades out over 350ms instead of snapping. Reveal flips
+            // visibility immediately (0s @ 0s) so the fade-in is visible.
+            'transition:opacity .35s ease, transform .35s ease, visibility 0s linear .35s;',
+            'font-family:"Roboto",sans-serif;}',
+            '#milkviz-bar.visible{opacity:1;transform:translateY(0);visibility:visible;',
+            'transition:opacity .18s cubic-bezier(.16,1,.3,1), transform .18s cubic-bezier(.16,1,.3,1), visibility 0s;}',
+            // Thin scrubbable progress line across the top of the bar.
+            '#milkviz-seek{position:relative;height:3px;border-radius:2px;cursor:pointer;',
+            'background:rgba(255,255,255,.3);margin-bottom:14px;}',
+            '#milkviz-seek-played{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:2px;',
+            'background:#f00;}',
+            '#milkviz-seek-knob{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;',
+            'background:#f00;transform:translate(-50%,-50%);left:0;opacity:0;transition:opacity .1s;}',
+            '#milkviz-seek:hover #milkviz-seek-knob{opacity:1;}',
+            // Control row.
+            '#milkviz-row{display:flex;align-items:center;gap:16px;}',
+            '#milkviz-bar button{border:0;background:transparent;padding:0;cursor:pointer;',
+            'display:flex;align-items:center;justify-content:center;}',
+            '#milkviz-bar button svg{width:24px;height:24px;stroke:#fff;fill:none;',
+            'stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}',
+            '#milkviz-bar button:focus-visible{outline:2px solid #1A73E8;outline-offset:2px;}',
+            // White-on-dark. LightThemeEngine stands down whenever any element is fullscreen
+            // (LightThemeEngine.swift ~877: `fullscreenActive` gates `light`), and this bar is
+            // fullscreen-only, so stylesheet !important suffices — no per-element inline fight
+            // needed. (If QA shows any light bleed, escalate to excluding #milkviz-bar from the
+            // engine's three restyle mechanisms — see the lightthemeengine-three-mechanisms note.)
+            '#milkviz-bar,#milkviz-bar *{color:#fff !important;-webkit-text-fill-color:#fff !important;}',
+            '#milkviz-time{font-size:13px;min-width:88px;white-space:nowrap;}',
+            '#milkviz-meta{display:flex;align-items:center;gap:10px;min-width:0;flex:1;}',
+            '#milkviz-thumb{width:40px;height:40px;border-radius:4px;object-fit:cover;flex:none;}',
+            '#milkviz-title{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+            // Volume: slider collapsed to 0 width, expands on hover/focus (YT-style).
+            // Volume slider holds a CONSTANT 72px width (space reserved) and only fades — animating
+            // width would reflow every sibling to its right on each hover (the "jumping around").
+            '#milkviz-vol-wrap{display:flex;align-items:center;gap:6px;flex:none;}',
+            '#milkviz-vol-slider{width:72px;opacity:0;pointer-events:none;height:4px;accent-color:#fff;',
+            'cursor:pointer;transition:opacity .18s ease;}',
+            '#milkviz-vol-wrap:hover #milkviz-vol-slider,#milkviz-vol-slider:focus-visible{opacity:1;pointer-events:auto;}',
+            // Preset name has a FIXED width so the ◀ ▶ arrows stay put regardless of name length
+            // (short names center, long names ellipsize) — no more growing/shrinking cluster.
+            '#milkviz-preset{display:flex;align-items:center;gap:6px;flex:none;}',
+            '#milkviz-preset-name{font-size:12px;width:150px;text-align:center;overflow:hidden;',
+            'text-overflow:ellipsis;white-space:nowrap;opacity:.85;}',
+            // Reduced motion: kill duration AND the visibility delay (else the bar strands
+            // visible for 350ms), drop the slide. Hide behavior itself is preserved.
+            '@media (prefers-reduced-motion: reduce){#milkviz-bar{transition-duration:.01ms;transition-delay:0s;transform:none;}',
+            '#milkviz-bar.visible{transition-duration:.01ms;transition-delay:0s;transform:none;}}',
+        ].join('');
+        document.head.appendChild(css);
+    }
+
+    // Bar element refs (assigned in buildBar, cleared in onGlobalFsChange teardown).
+    let _bar = null, _barPlayBtn = null, _barVolBtn = null, _barVolSlider = null,
+        _barPlayed = null, _barKnob = null, _barTime = null, _barThumb = null, _barTitle = null;
+    let _barVolSliding = false;   // true while dragging the volume slider (don't fight its value)
+    let _barVideo = null, _barVideoEvents = null;
+    let _barSeek = null;                         // Fix 8: stored for aria-value updates in updateBarTransport
+    let _seekCleanup = null;                     // Fix 3: tear-down fn for in-flight drag listeners
+    let _lastPaused = null, _lastMuted = null;   // Fix 9: guard icon-innerHTML churn
+
+    // Task 4 fills these in; no-op stubs so Task 3 runs standalone (REASSIGNED, not redeclared).
+    var resolveVideo = function () { return null; };
+    var bindVideo = function () {};
+    var unbindVideo = function () {};
+    var updateBarMeta = function () {};
+
+    function mkBtn(id, label, svg) {
+        const b = document.createElement('button');
+        b.id = id; b.type = 'button';
+        b.setAttribute('aria-label', label); b.title = label;
+        b.innerHTML = svg;
+        return b;
+    }
+
+    function buildBar() {
+        if (_bar || !_canvasHost) return;
+        injectBarCss();
+        const bar = document.createElement('div');
+        bar.id = 'milkviz-bar';
+        bar.setAttribute('role', 'group');
+        bar.setAttribute('aria-label', 'Playback controls');
+
+        const seek = document.createElement('div');
+        seek.id = 'milkviz-seek';
+        seek.setAttribute('role', 'slider'); seek.setAttribute('aria-label', 'Seek');
+        seek.setAttribute('tabindex', '0');
+        seek.setAttribute('aria-valuemin', '0');
+        seek.innerHTML = '<div id="milkviz-seek-played"></div><div id="milkviz-seek-knob"></div>';
+        seek.addEventListener('keydown', function (e) {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            e.preventDefault(); e.stopPropagation();
+            const v = _barVideo || resolveVideo();
+            if (!v) return;
+            const delta = e.key === 'ArrowRight' ? 5 : -5;
+            const t = window.MilkVizCtl.clampSeek(v.currentTime + delta, v.duration);
+            if (t !== null) { v.currentTime = t; updateBarTransport(); }
+        });
+
+        const row = document.createElement('div'); row.id = 'milkviz-row';
+        const prev = mkBtn('milkviz-prev', 'Previous', ICON.prev);
+        const play = mkBtn('milkviz-play', 'Play', ICON.play);
+        const next = mkBtn('milkviz-next', 'Next', ICON.next);
+        const time = document.createElement('div'); time.id = 'milkviz-time'; time.textContent = '0:00 / 0:00';
+
+        const meta = document.createElement('div'); meta.id = 'milkviz-meta';
+        const thumb = document.createElement('img'); thumb.id = 'milkviz-thumb'; thumb.alt = '';
+        const title = document.createElement('div'); title.id = 'milkviz-title';
+        meta.appendChild(thumb); meta.appendChild(title);
+
+        // Volume: icon (mute toggle) + slider that expands on hover, matching YT's video bar.
+        const volWrap = document.createElement('div'); volWrap.id = 'milkviz-vol-wrap';
+        const vol = mkBtn('milkviz-vol', 'Mute', ICON.vol);
+        const volSlider = document.createElement('input');
+        volSlider.id = 'milkviz-vol-slider'; volSlider.type = 'range';
+        volSlider.min = '0'; volSlider.max = '1'; volSlider.step = '0.01'; volSlider.value = '1';
+        volSlider.setAttribute('aria-label', 'Volume');
+        volWrap.appendChild(vol); volWrap.appendChild(volSlider);
+
+        const preset = document.createElement('div'); preset.id = 'milkviz-preset';
+        const pPrev = mkBtn('milkviz-preset-prev', 'Previous preset', ICON.presetPrev);
+        const pName = document.createElement('div'); pName.id = 'milkviz-preset-name';
+        pName.setAttribute('aria-live', 'polite');
+        const pNext = mkBtn('milkviz-preset-next', 'Next preset', ICON.presetNext);
+        preset.appendChild(pPrev); preset.appendChild(pName); preset.appendChild(pNext);
+
+        const exit = mkBtn('milkviz-exit', 'Exit fullscreen', ICON.exitFs);
+        exit.addEventListener('click', function (e) { e.stopPropagation(); exitFs(); });
+
+        prev.addEventListener('click', function (e) { e.stopPropagation(); proxyClick('prev'); });
+        next.addEventListener('click', function (e) { e.stopPropagation(); proxyClick('next'); });
+        play.addEventListener('click', function (e) {
+            e.stopPropagation();
+            proxyClick('play', function () {
+                const v = _barVideo || resolveVideo();
+                if (v) { v.paused ? v.play() : v.pause(); }
+            });
+        });
+        vol.addEventListener('click', function (e) {
+            e.stopPropagation();
+            const v = _barVideo || resolveVideo();
+            if (v) { v.muted = !v.muted; }
+        });
+        volSlider.addEventListener('pointerdown', function () { _barVolSliding = true; });
+        volSlider.addEventListener('input', function (e) {
+            e.stopPropagation();
+            const v = _barVideo || resolveVideo();
+            if (!v) return;
+            const val = parseFloat(volSlider.value);
+            v.volume = val; v.muted = val === 0;
+        });
+        const volDone = function () { _barVolSliding = false; };
+        volSlider.addEventListener('pointerup', volDone);
+        volSlider.addEventListener('pointercancel', volDone);
+        volSlider.addEventListener('blur', volDone);
+        pPrev.addEventListener('click', function (e) { e.stopPropagation(); doLoadPreset(_presetIdx - 1, 2.7); scheduleCycle(); });
+        pNext.addEventListener('click', function (e) { e.stopPropagation(); doLoadPreset(_presetIdx + 1, 2.7); scheduleCycle(); });
+
+        // Fix 9: reset icon state so a rebuilt bar always repaints the correct icon.
+        _lastPaused = _lastMuted = null;
+
+        // Hide prev/next if YT's buttons aren't present (never leave a dead control).
+        if (!ytBtn('prev')) prev.style.display = 'none';
+        if (!ytBtn('next')) next.style.display = 'none';
+
+        // Seek: click-to-seek and drag-to-scrub via clampSeek on the active video.
+        const seekTo = function (clientX) {
+            const v = _barVideo || resolveVideo();
+            if (!v) return;
+            const r = seek.getBoundingClientRect();
+            const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+            const t = window.MilkVizCtl.clampSeek(frac * v.duration, v.duration);
+            if (t !== null) { v.currentTime = t; updateBarTransport(); }
+        };
+        seek.addEventListener('pointerdown', function (e) {
+            e.stopPropagation();
+            if (_idle) _idle.setLock('scrub', true);
+            seekTo(e.clientX);
+            const move = function (ev) { seekTo(ev.clientX); };
+            const up = function () {
+                document.removeEventListener('pointermove', move);
+                document.removeEventListener('pointerup', up);
+                document.removeEventListener('pointercancel', up);
+                document.removeEventListener('lostpointercapture', up);
+                _seekCleanup = null;
+                if (_idle) _idle.setLock('scrub', false);
+            };
+            _seekCleanup = up;   // Fix 3: expose so stopIdle can force-clean on abnormal exit
+            document.addEventListener('pointermove', move);
+            document.addEventListener('pointerup', up);
+            document.addEventListener('pointercancel', up);
+            document.addEventListener('lostpointercapture', up);
+        });
+
+        row.appendChild(prev); row.appendChild(play); row.appendChild(next);
+        row.appendChild(time); row.appendChild(meta); row.appendChild(volWrap);
+        row.appendChild(preset); row.appendChild(exit);
+        bar.appendChild(seek); bar.appendChild(row);
+
+        bar.addEventListener('pointerenter', function () { if (_idle) _idle.setLock('hover', true); });
+        bar.addEventListener('pointerleave', function () { if (_idle) _idle.setLock('hover', false); });
+        bar.addEventListener('focusin', function () { if (_idle) { _idle.reveal(); _idle.setLock('focus', true); } });
+        bar.addEventListener('focusout', function (e) {
+            if (_idle && !bar.contains(e.relatedTarget)) _idle.setLock('focus', false);
+        });
+
+        _canvasHost.appendChild(bar);   // sibling of the canvas; NOT inside it
+
+        _bar = bar; _barPlayBtn = play; _barVolBtn = vol; _barVolSlider = volSlider;
+        _barPlayed = bar.querySelector('#milkviz-seek-played');
+        _barKnob = bar.querySelector('#milkviz-seek-knob');
+        _barTime = time; _barThumb = thumb; _barTitle = title;
+        _barPresetLabel = pName; _barSeek = seek;
+    }
+
+    // Task 4: wire active-video resolution + binding.
+    // Fix 5: prefer largest visible/playing video; fall back to pure helper.
+    resolveVideo = function () {
+        const all = Array.prototype.slice.call(document.querySelectorAll('video'));
+        const valid = all.filter(function (v) { return v && isFinite(v.duration) && v.duration > 0 && v.readyState >= 1; });
+        if (valid.length <= 1) return window.MilkVizCtl.pickActiveVideo(all);
+        const playing = valid.filter(function (v) { return !v.paused && !v.ended; });
+        const pool = playing.length ? playing : valid;
+        const area = function (v) { const r = v.getBoundingClientRect(); return r.width * r.height; };
+        return pool.reduce(function (best, v) { return (best && area(best) >= area(v)) ? best : v; }, null);
+    };
+
+    bindVideo = function (v) {
+        if (v === _barVideo) return;
+        unbindVideo();
+        _barVideo = v;
+        if (!v) return;
+        const onTime = function () { updateBarTransport(); };
+        const onState = function () { updateBarTransport(); };
+        v.addEventListener('timeupdate', onTime);
+        v.addEventListener('play', onState);
+        v.addEventListener('pause', onState);
+        v.addEventListener('volumechange', onState);
+        _barVideoEvents = { onTime, onState };
+        updateBarTransport();
+    };
+
+    unbindVideo = function () {
+        if (_barVideo && _barVideoEvents) {
+            _barVideo.removeEventListener('timeupdate', _barVideoEvents.onTime);
+            _barVideo.removeEventListener('play', _barVideoEvents.onState);
+            _barVideo.removeEventListener('pause', _barVideoEvents.onState);
+            _barVideo.removeEventListener('volumechange', _barVideoEvents.onState);
+        }
+        _barVideo = null; _barVideoEvents = null;
+    };
+
+    // New in Task 4 (not stubbed) — plain declaration is fine.
+    function updateBarTransport() {
+        if (!_bar) return;
+        const v = _barVideo;
+        const fmt = window.MilkVizCtl.formatTime;
+        if (v && isFinite(v.duration) && v.duration > 0) {
+            const pct = Math.max(0, Math.min(1, v.currentTime / v.duration)) * 100;
+            _barPlayed.style.width = pct + '%';
+            _barKnob.style.left = pct + '%';
+            _barTime.textContent = fmt(v.currentTime) + ' / ' + fmt(v.duration);
+            // Fix 8: keep the slider's ARIA value semantics honest.
+            if (_barSeek) {
+                _barSeek.setAttribute('aria-valuemax', String(Math.floor(v.duration)));
+                _barSeek.setAttribute('aria-valuenow', String(Math.floor(v.currentTime)));
+                _barSeek.setAttribute('aria-valuetext', fmt(v.currentTime) + ' of ' + fmt(v.duration));
+            }
+        } else {
+            _barPlayed.style.width = '0%'; _barKnob.style.left = '0%';
+            _barTime.textContent = '0:00 / 0:00';
+        }
+        // Fix 9: only rewrite innerHTML when paused/muted state actually flips (avoids ~4×/sec SVG reparse).
+        const paused = !v || v.paused;
+        if (paused !== _lastPaused) {
+            _lastPaused = paused;
+            _barPlayBtn.innerHTML = paused ? ICON.play : ICON.pause;
+        }
+        _barPlayBtn.setAttribute('aria-label', paused ? 'Play' : 'Pause');
+        _barPlayBtn.setAttribute('aria-pressed', paused ? 'false' : 'true');
+        _barPlayBtn.title = paused ? 'Play' : 'Pause';
+        const muted = !!(v && v.muted);
+        if (muted !== _lastMuted) {
+            _lastMuted = muted;
+            _barVolBtn.innerHTML = muted ? ICON.volMute : ICON.vol;
+        }
+        _barVolBtn.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+        _barVolBtn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+        if (_barVolSlider && v && !_barVolSliding) _barVolSlider.value = String(v.muted ? 0 : v.volume);
+    }
+
+    // REASSIGN the Task 3 Step 6b stub (do not redeclare).
+    updateBarMeta = function () {
+        if (!_bar) return;
+        const meta = navigator.mediaSession && navigator.mediaSession.metadata;
+        const title = meta && meta.title ? meta.title : '';
+        const artist = meta && meta.artist ? meta.artist : '';
+        _barTitle.textContent = title ? (artist ? (title + ' — ' + artist) : title) : '';
+        const art = meta && meta.artwork && meta.artwork.length ? meta.artwork[meta.artwork.length - 1].src : '';
+        if (art) { _barThumb.src = art; _barThumb.style.display = ''; }
+        else { _barThumb.removeAttribute('src'); _barThumb.style.display = 'none'; }
+    };
+
+    // Best-effort: YT Music's player-bar transport controls. Selectors are confirmed in QA
+    // (headless DOM inspection isn't possible — see the file's segment-detection note).
+    function ytBtn(kind) {
+        const bar = document.querySelector('ytmusic-player-bar');
+        if (!bar) return null;
+        const map = {
+            play: '#play-pause-button',
+            prev: 'tp-yt-paper-icon-button.previous-button, .previous-button',
+            next: 'tp-yt-paper-icon-button.next-button, .next-button',
+        };
+        return bar.querySelector(map[kind]);
+    }
+
+    function proxyClick(kind, videoFallback) {
+        const b = ytBtn(kind);
+        if (b) { b.click(); return true; }
+        if (videoFallback) videoFallback();
+        return false;
+    }
+
+    // Real implementation — REASSIGN the Task 2 var (do not redeclare; `_barPresetLabel`
+    // and `var setBarPresetLabel` already exist from Task 2).
+    // Fix 6: also set aria-label so the full preset name is surfaced to a11y.
+    setBarPresetLabel = function (name) {
+        if (!_barPresetLabel) return;
+        _barPresetLabel.textContent = name || '';
+        _barPresetLabel.title = name || '';
+        _barPresetLabel.setAttribute('aria-label', name || '');
+    };
+
+    // Idle controller + activity listeners.
+    let _idle = null, _idleListeners = null;
+
+    function applyVisualizerReveal(show) {
+        if (!_bar) return;
+        _bar.classList.toggle('visible', show);
+        if (_canvasHost) _canvasHost.style.cursor = show ? 'auto' : 'none';
+    }
+
+    // Video-fullscreen idle helpers (Task 5).
+    let _videoChromeSavedCss = null;   // Fix 1: snapshot of YT's original inline styles
+
+    function injectVideoIdleCss() {
+        if (document.getElementById('milkviz-video-idle-css')) return;
+        const css = document.createElement('style');
+        css.id = 'milkviz-video-idle-css';
+        css.textContent = 'html.milkviz-idle, html.milkviz-idle *{cursor:none !important;}';
+        document.head.appendChild(css);
+    }
+
+    // YT's native video-fullscreen chrome. Selector list confirmed/extended by the Step 0 spike.
+    function videoFsChrome() {
+        const sels = ['ytmusic-player-bar', '.ytp-chrome-bottom', '.ytmusic-player-bar'];
+        for (let i = 0; i < sels.length; i++) {
+            const el = document.querySelector(sels[i]);
+            if (el) return el;
+        }
+        return null;
+    }
+
+    // Fix 2: shared reduced-motion helper (also used by applyVideoReveal).
+    function _reducedMotion() {
+        return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    }
+
+    // Fix 1: snapshot YT's inline styles before hiding so they're restored exactly on reveal.
+    function applyVideoReveal(show) {
+        document.documentElement.classList.toggle('milkviz-idle', !show);   // cursor:none when hidden
+        const el = videoFsChrome();
+        if (!el) return;
+        if (show) {
+            if (_videoChromeSavedCss !== null) { el.style.cssText = _videoChromeSavedCss; _videoChromeSavedCss = null; }
+        } else {
+            if (_videoChromeSavedCss === null) _videoChromeSavedCss = el.style.cssText;   // snapshot YT's own inline styles once
+            const reduce = _reducedMotion();
+            el.style.setProperty('opacity', '0', 'important');
+            el.style.setProperty('pointer-events', 'none', 'important');
+            el.style.setProperty('transition', reduce ? 'none' : 'opacity .35s ease, visibility 0s linear .35s', 'important');
+            el.style.setProperty('visibility', 'hidden', 'important');
+        }
+    }
+
+    // Peek zone: bottom 15% of the host counts as activity even before reaching the bar.
+    function inPeekZone(e) {
+        if (!_canvasHost) return false;
+        const r = _canvasHost.getBoundingClientRect();
+        return e.clientY >= r.bottom - r.height * 0.15;
+    }
+
+    function startIdle(onShow, onHide) {
+        stopIdle();
+        _idle = window.MilkVizCtl.createIdleController({ onShow: onShow, onHide: onHide });
+
+        const onMove = function (e) {
+            if (inPeekZone(e)) _idle.reveal(); else _idle.activity(e.clientX, e.clientY);
+        };
+        const onDown = function () { _idle.reveal(); };
+        const onFocus = function () { _idle.reveal(); };
+        const onKey = function (e) {
+            if (e.key === 'Escape' && isVizFullscreen()) { exitFs(); return; }
+            if (['ArrowLeft','ArrowRight',' ','k','m','f','Escape'].indexOf(e.key) !== -1) _idle.reveal();
+        };
+        const onScrubEnd = function () { _idle.setLock('scrub', false); };
+
+        // Fix 4: re-resolve active video when a new track starts (covers YT swapping <video>).
+        const onMediaChange = function () {
+            if (isVizFullscreen()) { bindVideo(resolveVideo()); updateBarMeta(); }
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('pointerdown', onDown);
+        document.addEventListener('focusin', onFocus);
+        document.addEventListener('keydown', onKey);
+        document.addEventListener('play', onMediaChange, true);           // capture: play doesn't bubble
+        document.addEventListener('loadedmetadata', onMediaChange, true);
+        window.addEventListener('pointerup', onScrubEnd);
+        window.addEventListener('pointercancel', onScrubEnd);
+        window.addEventListener('lostpointercapture', onScrubEnd);
+        window.addEventListener('blur', onScrubEnd);
+        _idleListeners = { onMove, onDown, onFocus, onKey, onScrubEnd, onMediaChange };
+        _idle.reveal();   // controls visible on entry, then auto-hide after the idle timeout
+    }
+
+    function stopIdle() {
+        if (_seekCleanup) _seekCleanup();   // Fix 3: force-clean any in-flight drag listeners
+        if (_idleListeners) {
+            const l = _idleListeners;
+            document.removeEventListener('mousemove', l.onMove);
+            document.removeEventListener('pointerdown', l.onDown);
+            document.removeEventListener('focusin', l.onFocus);
+            document.removeEventListener('keydown', l.onKey);
+            document.removeEventListener('play', l.onMediaChange, true);          // Fix 4
+            document.removeEventListener('loadedmetadata', l.onMediaChange, true); // Fix 4
+            window.removeEventListener('pointerup', l.onScrubEnd);
+            window.removeEventListener('pointercancel', l.onScrubEnd);
+            window.removeEventListener('lostpointercapture', l.onScrubEnd);
+            window.removeEventListener('blur', l.onScrubEnd);
+            _idleListeners = null;
+        }
+        if (_idle) { _idle.destroy(); _idle = null; }
+        if (_canvasHost) _canvasHost.style.cursor = 'auto';
     }
 
     // Called by native (in response to the fs button's 'enterFullscreen' message) so the
     // request runs without transient activation — the only context WebKit accepts here.
     MilkViz.enterFullscreen = function () {
-        if (!_canvasHost || document.fullscreenElement) return;
+        if (!_canvasHost || document.fullscreenElement || document.webkitFullscreenElement) return;   // Fix 7a
         var req = _canvasHost.requestFullscreen || _canvasHost.webkitRequestFullscreen;
         if (req) req.call(_canvasHost);
     };
+
+    // True only when OUR canvas host is the fullscreen element (not YT's native video fs).
+    function isVizFullscreen() {
+        var fe = document.fullscreenElement || document.webkitFullscreenElement;
+        return !!_canvasHost && fe === _canvasHost;
+    }
+
+    // Exit fullscreen with the WebKit-prefixed fallback (this feature already touches prefixed fs).
+    function exitFs() {
+        var fn = document.exitFullscreen || document.webkitExitFullscreen;
+        if (fn) fn.call(document);
+    }
 
     function addFullscreenControl() {
         if (_fsBtn || !_canvasHost) return;
@@ -944,8 +1461,7 @@
         grad.id = 'milkviz-fs-gradient';
         grad.style.cssText =
             'position:absolute;top:0;left:0;right:0;height:72px;' +
-            'background:linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0));' +
-            'opacity:0;transition:opacity .2s ease;pointer-events:none;z-index:2;';
+            'opacity:0;transition:opacity .2s ease;pointer-events:none;z-index:2;';   // background set by applyFsChrome (theme-aware)
         _canvasHost.appendChild(grad);
         _fsGradient = grad;
 
@@ -959,14 +1475,17 @@
             'position:absolute;top:14px;right:18px;width:28px;height:28px;' +
             'display:flex;align-items:center;justify-content:center;' +
             'opacity:0;transition:opacity .2s ease;cursor:pointer;pointer-events:auto;' +
-            'z-index:3;border:none;background:transparent;padding:0;';
+            'z-index:3;border:none;background:transparent;padding:0;' +
+            // White icon to match YT's video/album-art controls; drop-shadow keeps it legible on
+            // the light (page-bg) scrim. currentColor drives the SVG stroke.
+            'color:#fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.55));';
 
         // Sibling of the canvas, so the capture-phase preset-skip handler's
         // canvas.contains() check passes it through; stopPropagation is belt-and-braces.
         btn.addEventListener('click', function (e) {
             e.stopPropagation();
-            if (document.fullscreenElement) {
-                document.exitFullscreen();
+            if (document.fullscreenElement || document.webkitFullscreenElement) {   // Fix 7b
+                exitFs();
                 return;
             }
             // A real click carries transient activation, and WebKit rejects a gesture-initiated
@@ -978,36 +1497,65 @@
 
         _canvasHost.appendChild(btn);
         _fsBtn = btn;
+        applyFsChrome();   // theme-match the gradient + icon to YT's video/album-art scrim
+
+        // Attribution: Butterchurn powers the visuals (MIT, jberg). Bottom-left, hover-revealed
+        // like the fs button. Sibling of the canvas so the preset-skip handler's canvas.contains()
+        // check ignores it; the http(s) link falls through the nav delegate's allowlist and opens
+        // in the system browser (github.com isn't allowlisted). stopPropagation is belt-and-braces.
+        const credit = document.createElement('a');
+        credit.id = 'milkviz-credit';
+        credit.href = 'https://github.com/jberg/butterchurn';
+        credit.textContent = 'Butterchurn';
+        credit.title = 'MilkDrop-style visuals by Butterchurn (jberg) — opens GitHub';
+        credit.target = '_blank';
+        credit.rel = 'noopener noreferrer';
+        credit.style.cssText =
+            'position:absolute;left:18px;bottom:14px;z-index:3;' +
+            'font:500 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.02em;' +
+            'color:#fff;text-decoration:none;text-shadow:0 1px 2px rgba(0,0,0,0.6);' +
+            'opacity:0;transition:opacity .2s ease;cursor:pointer;pointer-events:auto;';
+        credit.addEventListener('click', function (e) { e.stopPropagation(); });
+        _canvasHost.appendChild(credit);
+        _credit = credit;
 
         _fsChangeHandler = function () {
-            const inFs = document.fullscreenElement === _canvasHost;
+            const inFs = isVizFullscreen();
             if (_canvasHost) {
-                // In fullscreen: edge-to-edge immersive — drop the breathing-room padding and
-                // use a true black backdrop (no light-theme page bg bleeding into fullscreen).
-                // Inline so it beats the page-bg the host carries from the windowed state.
                 _canvasHost.style.padding = inFs ? '0' : '24px';
                 _canvasHost.style.background = inFs ? '#000' : pageBgColor();
             }
             applySize();
             if (_fsBtn) {
+                // Top-right FS button hides in fullscreen (exit lives in the bar); shows when windowed.
+                _fsBtn.style.display = inFs ? 'none' : '';
                 _fsBtn.title = inFs ? 'Exit fullscreen' : 'Enter fullscreen';
                 _fsBtn.setAttribute('aria-label', _fsBtn.title);
             }
+            // No top hover scrim in fullscreen — the bottom bar owns chrome there (the scrim was
+            // bleeding a light band across the top of the fullscreen visualizer).
+            if (_fsGradient) _fsGradient.style.display = inFs ? 'none' : '';
         };
         document.addEventListener('fullscreenchange', _fsChangeHandler);
         document.addEventListener('webkitfullscreenchange', _fsChangeHandler);
     }
 
     function removeFullscreenControl() {
-        if (document.fullscreenElement) {
-            document.exitFullscreen().catch(function () {});
+        if (document.fullscreenElement || document.webkitFullscreenElement) {   // Fix 7c
+            exitFs();
         }
         if (_fsChangeHandler) {
             document.removeEventListener('fullscreenchange', _fsChangeHandler);
             document.removeEventListener('webkitfullscreenchange', _fsChangeHandler);
             _fsChangeHandler = null;
         }
+        stopIdle();
+        unbindVideo();
+        if (_bar) { _bar.remove(); _bar = null; _barPresetLabel = null; }
+        document.documentElement.classList.remove('milkviz-idle');   // belt-and-braces (video adapter)
+        _activeAdapter = null;   // reset the global handler's state so a later fs re-fires cleanly
         if (_fsBtn) { _fsBtn.remove(); _fsBtn = null; }
+        if (_credit) { _credit.remove(); _credit = null; }
         if (_fsGradient) { _fsGradient.remove(); _fsGradient = null; }
     }
 
@@ -1050,6 +1598,54 @@
         if (page) obs.observe(page, { attributes: true });
     }
 
+    // --- Task 3: Single global fullscreen handler (sole owner of adapter selection + bar + idle) ---
+
+    let _activeAdapter = null;   // 'viz' | 'video' | null — exactly one idle owner at a time
+    let _globalFsBound = false;
+
+    function onGlobalFsChange() {
+        const fe = document.fullscreenElement || document.webkitFullscreenElement;
+        let want = !fe ? null : (isVizFullscreen() ? 'viz' : 'video');
+        // Guard the teardown race: removeFullscreenControl() may exit fullscreen (async) and null
+        // _activeAdapter while _canvasHost still momentarily exists. If the visualizer is no longer
+        // active, never (re)build the viz adapter on a late fullscreenchange.
+        if (want === 'viz' && !_active) want = null;
+        if (want === _activeAdapter) return;   // idempotent: ignore no-op re-fires
+
+        // Tear down whatever adapter was active.
+        if (_activeAdapter === 'viz') {
+            stopIdle();
+            unbindVideo();                                   // no-op until Task 4 defines it
+            if (_bar) { _bar.remove(); _bar = null; _barPresetLabel = null; }
+        } else if (_activeAdapter === 'video') {
+            stopIdle();
+            applyVideoReveal(true);   // clears the inline hide + the cursor class
+        }
+        _activeAdapter = want;
+
+        // Start the newly-selected adapter.
+        if (want === 'viz') {
+            buildBar();
+            startIdle(function () { applyVisualizerReveal(true); },
+                      function () { applyVisualizerReveal(false); });
+            bindVideo(resolveVideo());                       // no-ops until Task 4 defines them
+            updateBarMeta();
+            if (_presetNames.length) setBarPresetLabel(_presetNames[_presetIdx]);
+        }
+        else if (want === 'video') {
+            injectVideoIdleCss();
+            startIdle(function () { applyVideoReveal(true); },
+                      function () { applyVideoReveal(false); });
+        }
+    }
+
+    function bindGlobalFs() {
+        if (_globalFsBound) return;
+        _globalFsBound = true;
+        document.addEventListener('fullscreenchange', onGlobalFsChange);
+        document.addEventListener('webkitfullscreenchange', onGlobalFsChange);
+    }
+
     // Boot the segment observer. Gated on __ytmVizSupported AND being on a YT Music page.
     function startSegObserver() {
         if (!window.__ytmVizSupported) {
@@ -1064,6 +1660,7 @@
             console.log('MilkViz: not a YT Music page (' + location.hostname + ') — skipping injection');
             return;
         }
+        bindGlobalFs();
 
         // Attempt injection immediately (page may already have the control).
         scheduleInjectCheck();
