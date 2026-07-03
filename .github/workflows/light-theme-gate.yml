@@ -1,0 +1,56 @@
+# Deterministic gate: runs the WebKit light-theme harness against the FROZEN fake fixtures.
+# Catches regressions in OUR engine (LightThemeEngine.swift) — a mis-theme diffs the tight
+# 0.03 screenshot gate or trips a contrast/state audit. No auth, no live content, so it's
+# stable enough to block merges. (It does NOT catch YT changing their live DOM — that's the
+# canary's job; see light-theme-canary.yml.)
+#
+# Runs on macOS because: (1) the app renders in a WKWebView and WebKit-on-macOS matches what
+# users see, and (2) the committed screenshot baselines are platform-tagged `*-darwin.png`.
+name: light-theme gate
+
+on:
+  pull_request:
+    paths:
+      - 'youtube-music-player/LightThemeEngine.swift'
+      - 'youtube-music-player/YouTubeMusicWebView.swift'
+      - 'harness/**'
+      - '.github/workflows/light-theme-gate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'youtube-music-player/LightThemeEngine.swift'
+      - 'youtube-music-player/YouTubeMusicWebView.swift'
+      - 'harness/**'
+  workflow_dispatch: {}
+
+concurrency:
+  group: light-theme-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: harness/package-lock.json
+      - run: npm ci
+      - name: Install WebKit
+        run: npx playwright install webkit
+      - name: Run deterministic fixture suite
+        run: npx playwright test
+        # No YTM_AUTH (fixtures self-populate logged-out) and no YTM_LIVE (fixture mode).
+      - name: Upload report on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: harness/playwright-report/
+          retention-days: 14

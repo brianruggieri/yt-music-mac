@@ -198,8 +198,23 @@ enum LightThemeEngine {
             // stays "selected" next to the Visualizer, and we'd need counter-observers). Gate
             // them off the milkviz-owned toggle; they still theme the plain 2-button control
             // before injection / when the visualizer is unsupported.
-            ['.av-toggle:not(.milkviz-styled)', 'background-color: var(--ytmusic-color-black1)'],
+            // Explicit recessed-grey track (not the --ytmusic-color-black1 token, which the
+            // inversion doesn't always reach on the player PAGE — leaving a dark track that
+            // fails label contrast). #e4e4e4 matches the intended #dedede recessed grey and
+            // makes both segments sit on light, so the dark labels below always read.
+            ['.av-toggle:not(.milkviz-styled)', 'background-color: rgb(228, 228, 228)'],
             ['ytmusic-av-toggle[playback-mode="ATV_PREFERRED"] .av-toggle:not(.milkviz-styled) .song-button.ytmusic-av-toggle, ytmusic-av-toggle[playback-mode="OMV_PREFERRED"] .av-toggle:not(.milkviz-styled) .video-button.ytmusic-av-toggle',
+                'background-color: rgb(255, 255, 255); box-shadow: 0 1px 2px rgba(0,0,0,0.2)'],
+            // Segment BUTTONS on the fallback (non-milkviz) toggle. YT styles the raised pill
+            // and label on the host `.X-button.ytmusic-av-toggle`, but on the player PAGE the
+            // real element is a `<button class="X-button">` the host rules miss — leaving a
+            // dark button bg + white label (white-on-white when unselected, dark-on-dark when
+            // selected; the harness player-page gate caught both). Drive the button directly:
+            // dark label always, transparent by default (shows the grey track)…
+            ['.av-toggle:not(.milkviz-styled) button.song-button, .av-toggle:not(.milkviz-styled) button.video-button',
+                'color: rgb(20, 20, 20); background-color: transparent'],
+            // …and a white raised pill on whichever segment YT's playback-mode marks selected.
+            ['ytmusic-av-toggle[playback-mode="ATV_PREFERRED"] .av-toggle:not(.milkviz-styled) button.song-button, ytmusic-av-toggle[playback-mode="OMV_PREFERRED"] .av-toggle:not(.milkviz-styled) button.video-button',
                 'background-color: rgb(255, 255, 255); box-shadow: 0 1px 2px rgba(0,0,0,0.2)'],
             // Modal scrim (tp-yt-iron-overlay-backdrop — the dimming layer behind every
             // dialog: edit-playlist, add-to-playlist, etc.). YT colours it from an inverted
@@ -353,6 +368,20 @@ enum LightThemeEngine {
             // separate .title element) above it.
             ['.content-info-wrapper.ytmusic-player-bar yt-formatted-string.byline.ytmusic-player-bar',
                 'color: rgb(82,82,82)'],
+            // Byline LINKS: the rule above recolours the byline parent (separators + the
+            // inheriting "• views • likes" runs), but the artist/album <a> links carry their
+            // own translucent token. The runtime rescue darkens them once then caches them,
+            // and YT REUSES the node on track change while wiping our inline colour — the cache
+            // guard (fixedEls) then skips them forever, so the artist reverts to washed-out
+            // grey on the next song. Pin the links so they re-apply on every re-render.
+            ['.content-info-wrapper.ytmusic-player-bar yt-formatted-string.byline.ytmusic-player-bar a',
+                'color: rgb(82,82,82)'],
+            // Player-bar like/dislike thumbs: same cache-fragility — the neutral thumb glyphs
+            // are only darkened by the cached icon-rescue, so a track change (node reuse) can
+            // leave them on YT's grey token, flipping their weight run-to-run. Pin the fill
+            // dark so both states (outline / filled-when-active) stay a consistent dark thumb.
+            ['ytmusic-player-bar ytmusic-like-button-renderer yt-button-shape, ytmusic-player-bar ytmusic-like-button-renderer svg, ytmusic-player-bar ytmusic-like-button-renderer svg path',
+                'color: rgb(20,20,20); fill: rgb(20,20,20)'],
             // Multi-select checkboxes (#14): same damped ~8% token on the hollow-square svg;
             // the icon-rescue skips it (fill alpha < 0.4 gate). Give the outline a visible
             // weight, and a near-black filled box when checked.
@@ -802,7 +831,7 @@ enum LightThemeEngine {
             //   • over media (white glyph on album art + scrim)
             //   • on a dark/coloured surface (e.g. the white triangle on the #f03 play button)
             //   • saturated/brand glyphs (semantic colour, conveyed redundantly)
-            const mediaRects = [].slice.call(document.querySelectorAll('img, yt-img-shadow, [style*="background-image"]'))
+            const artRects = [].slice.call(document.querySelectorAll('img, yt-img-shadow, [style*="background-image"]'))
                 // Real media only: a background-image counts as "media" ONLY if it's an actual
                 // url() image — NOT a gradient. imgs always count.
                 .filter(m => m.tagName === 'IMG' || m.tagName === 'YT-IMG-SHADOW' || /url\(/i.test(getComputedStyle(m).backgroundImage))
@@ -814,9 +843,26 @@ enum LightThemeEngine {
                 // (thumbnails/covers) is ≤ ~540px and not inside these immersive containers.
                 .filter(m => !m.closest('ytmusic-fullbleed-thumbnail, ytmusic-immersive-header-renderer, .background-gradient'))
                 .map(m => m.getBoundingClientRect()).filter(b => b.width > 24 && b.height > 24 && b.width < 700);
+            // Video + the MilkDrop visualizer <canvas>: real FOREGROUND media that is
+            // legitimately large (the now-playing pane fills the player), so the 700px art cap
+            // must NOT apply. Their hover-overlay controls (fullscreen/expand/play) have to stay
+            // WHITE like dark mode: the canvas/video paints the visible backdrop but has no CSS
+            // opaque background, so effectiveBg would wrongly read the light player page behind
+            // it and darken the glyph to black. Same immersive full-bleed guard as art.
+            const vizRects = [].slice.call(document.querySelectorAll('video, canvas'))
+                .filter(m => !m.closest('ytmusic-fullbleed-thumbnail, ytmusic-immersive-header-renderer, .background-gradient'))
+                .map(m => m.getBoundingClientRect()).filter(b => b.width > 40 && b.height > 40);
+            const mediaRects = artRects.concat(vizRects);
             const overMedia = (r) => { const cx = r.left + r.width / 2, cy = r.top + r.height / 2; return mediaRects.some(b => cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom); };
             for (const ic of document.querySelectorAll('button svg, a svg, [role="button"] svg, tp-yt-paper-icon-button svg, yt-icon svg')) {
                 if (iconFixedEls.has(ic)) continue;
+                // Play buttons are fully governed by the dedicated static rules (the knockout
+                // dark default, the over-art WHITE exception, and the header/guide red). The
+                // audit's neutral-icon darkening was second-guessing them: on video/card play
+                // triangles its overMedia geometry reads false, so it stamped an inline grey
+                // !important that OVERRODE the white exception — black play buttons on art.
+                // Stand down and let the static play-button rules win.
+                if (ic.closest('ytmusic-play-button-renderer')) continue;
                 if (ic.closest('#milkviz-canvas-host')) continue;   // visualizer-owned overlay (FS button + bar) sets its own white icons (matches YT media controls)
                 const ir = ic.getBoundingClientRect();
                 if (ir.width < 10 || ir.width > 56 || ir.height < 10 || ir.bottom < 0 || ir.top > innerHeight) continue;

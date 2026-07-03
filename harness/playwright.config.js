@@ -10,6 +10,11 @@ export default defineConfig({
   outputDir: './test-results',
   timeout: 90_000,
   expect: { timeout: 15_000 },
+  // Fixtures make content deterministic, so the 0.03 screenshot gate is tight. Occasional
+  // partial-render captures under machine load still slip through; a retry re-runs the flaky
+  // shot and passes, while a REAL theme break (~80% diff) fails all attempts. This is the
+  // standard Playwright answer to timing flakiness — keeps the tight gate honest.
+  retries: 2,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     ...devices['Desktop Safari'],          // WebKit

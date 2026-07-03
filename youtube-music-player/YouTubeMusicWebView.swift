@@ -42,8 +42,12 @@ class YouTubeMusicViewModel {
     weak var webView: WKWebView?
 
     // Force the webview's appearance to the chosen mode; the light-theme engine
-    // picks up the resulting prefers-color-scheme change on its own.
+    // picks up the resulting prefers-color-scheme change on its own. The app-wide
+    // appearance must be forced too: WebKit draws the native root scrollbar from the
+    // window's appearance (not the webview's), so without this the scroller follows
+    // the macOS setting even when the theme is forced.
     func applyTheme(_ mode: ThemeMode) {
+        NSApp.appearance = mode.appearance
         webView?.appearance = mode.appearance
     }
 
@@ -367,6 +371,7 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         if #available(macOS 13.3, *) { webView.isInspectable = true }
         #endif
         webView.appearance = mode.appearance   // force light/dark; nil = follow system
+        NSApp.appearance = mode.appearance     // window too — native root scrollbar keys off it
 
         viewModel.webView = webView
         context.coordinator.webView = webView
