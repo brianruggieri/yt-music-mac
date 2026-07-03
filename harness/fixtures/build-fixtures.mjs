@@ -16,11 +16,13 @@ const MAP = {
   'browse-moods.json': 'browse-moods', 'browse-library.json': 'browse-library',
   'browse-album.json': 'browse-album', 'browse-playlist.json': 'browse-playlist',
   'browse-artist.json': 'browse-artist',
+  'browse-podcasts.json': 'browse-podcasts',
   'playlist_get_add_to_playlist.json': 'add-to-playlist', 'share_get_share_panel.json': 'share-panel',
   'account_get_setting.json': 'settings',
   'next.json': 'next', 'player.json': 'player', 'account_menu.json': 'account_menu',
   'guide.json': 'guide', 'search-search.json': 'search',
   'search-music_get_search_suggestions.json': 'search-suggestions',
+  'search-empty.json': 'search-empty',
 };
 
 const sampleTitles = (obj) => {

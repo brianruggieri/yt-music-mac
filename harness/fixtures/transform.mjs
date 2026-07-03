@@ -229,11 +229,28 @@ export function transform(root, fake) {
       setText(c.subtitle, 'Artist • 2.1M subscribers');
       setThumb(c.thumbnail, `${ASSET}/artist/${slug(a)}.png`);
     }
-    // Artist About section (musicDescriptionShelfRenderer): the full real-world bio.
+    // musicDescriptionShelfRenderer serves TWO surfaces: the artist About bio, and the
+    // player LYRICS tab (real copyrighted lyrics + a "Source: Musixmatch" footer). Detect
+    // lyrics by the footer/newlines and replace with invented lyrics; else the artist bio.
     if (node.musicDescriptionShelfRenderer) {
       const d = node.musicDescriptionShelfRenderer;
-      setText(d.description, 'An independent recording artist blending analog warmth with modern production. Their releases have quietly built a devoted following across late-night radio and festival stages alike.');
-      if (d.header) setText(d.header, 'About');
+      const footer = (d.footer && d.footer.runs || []).map((r) => r.text).join('');
+      const desc = (d.description && d.description.runs || []).map((r) => r.text).join('');
+      if (/source:/i.test(footer) || (desc.match(/\n/g) || []).length >= 3) {
+        setText(d.description, [
+          'City lights bleed into the tide',
+          'I keep your signal on my side',
+          'Neon hums a quiet tune',
+          'Coastline glowing under the moon',
+          '',
+          'Hold the line, hold the line',
+          'Every echo answers back in time',
+        ].join('\n'));
+        if (d.footer) setText(d.footer, 'Source: fixture');
+      } else {
+        setText(d.description, 'An independent recording artist blending analog warmth with modern production. Their releases have quietly built a devoted following across late-night radio and festival stages alike.');
+        if (d.header) setText(d.header, 'About');
+      }
     }
     // Plain-STRING description fields (SEO/share text variants — not runs): real content
     // sentences about the real entity; replace wholesale rather than name-patching.

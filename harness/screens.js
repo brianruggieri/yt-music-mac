@@ -17,6 +17,11 @@ export const SCREENS = [
   { name: 'album-detail', path: '/browse/MPREb_DYSzDJvUSDu' },
   { name: 'playlist-detail', path: '/playlist?list=PLL-QUKxvck0fMtxQ2aXuU_872TdKnEcLm' },
   { name: 'artist-detail', path: '/channel/UCRr1xG_2WIDs18a6cIiCxeA' },
+  { name: 'podcasts', path: '/podcasts' },
+  { name: 'search-empty', path: '/search?q=zzqxwvkjhgp0987xyz' },   // "No results" empty state
+  // NOTE (un-gated): empty-LIBRARY state can't be fabricated (this account has content, no
+  // empty-state renderer to fake); transient toasts/snackbars auto-dismiss and can't be
+  // screenshotted deterministically. Both stay on manual QA.
 ];
 
 // Interaction openers — each navigates somewhere, then opens a dynamic surface.
@@ -94,34 +99,35 @@ export const INTERACTIONS = [
   {
     name: 'player-page',
     path: '/',
-    async open(page) {
-      // Create playback state deterministically: click a track row (the player/next XHRs are
-      // served fake, so the bar populates even with no persisted session — CI runs auth-free).
-      const row = page.locator('ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer, ytmusic-carousel-shelf-renderer ytmusic-responsive-list-item-renderer')
-        .filter({ visible: true }).first();
-      await row.scrollIntoViewIfNeeded(T);
-      await row.click(T);
-      await page.waitForFunction(() => {
-        const t = document.querySelector('ytmusic-player-bar .content-info-wrapper .title');
-        return t && t.textContent.trim().length > 0;
-      }, null, { timeout: 15_000 });
-      // Expand to the full now-playing page (side panel carries the up-next QUEUE, so this
-      // one surface covers both). The bar ships hidden duplicate controls, so click the
-      // first VISIBLE expand trigger; the bar thumbnail is the fallback.
-      const triggers = page.locator('ytmusic-player-bar .toggle-player-page-button, ytmusic-player-bar button[aria-label*="player page" i], ytmusic-player-bar .expand-button, ytmusic-player-bar img.image');
-      const n = await triggers.count();
-      for (let i = 0; i < n; i++) {
-        const t = triggers.nth(i);
-        if (await t.isVisible().catch(() => false)) { await t.click({ force: true, ...T }); break; }
-      }
-      await page.locator('ytmusic-player-page').first().waitFor({ state: 'visible', ...T });
-      // queue rows in the side panel = the faked `next` fixture
-      await page.locator('ytmusic-player-queue-item, ytmusic-player-queue ytmusic-playlist-panel-video-renderer, ytmusic-playlist-panel-video-renderer').first()
-        .waitFor({ state: 'visible', ...T }).catch(() => {});
-      await page.waitForTimeout(800);   // let the page-open transition finish
-    },
+    async open(page) { await openPlayerPage(page); },
   },
+  // NOTE: the player LYRICS and RELATED tabs fetch per-track via browse(MPLY…/MPTR…), but that
+  // in-SPA fetch isn't reliably intercepted by the fixture route (real, copyrighted lyrics leak
+  // into the render), so they're left un-gated rather than baselined with real content. The
+  // player page's Up-Next/queue + the Song/Video toggle ARE covered by `player-page` above.
 ];
+
+// Shared: start playback (click a track) and expand to the full now-playing player page.
+async function openPlayerPage(page) {
+  const row = page.locator('ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer, ytmusic-carousel-shelf-renderer ytmusic-responsive-list-item-renderer')
+    .filter({ visible: true }).first();
+  await row.scrollIntoViewIfNeeded(T);
+  await row.click(T);
+  await page.waitForFunction(() => {
+    const t = document.querySelector('ytmusic-player-bar .content-info-wrapper .title');
+    return t && t.textContent.trim().length > 0;
+  }, null, { timeout: 15_000 });
+  const triggers = page.locator('ytmusic-player-bar .toggle-player-page-button, ytmusic-player-bar button[aria-label*="player page" i], ytmusic-player-bar .expand-button, ytmusic-player-bar img.image');
+  const n = await triggers.count();
+  for (let i = 0; i < n; i++) {
+    const t = triggers.nth(i);
+    if (await t.isVisible().catch(() => false)) { await t.click({ force: true, ...T }); break; }
+  }
+  await page.locator('ytmusic-player-page').first().waitFor({ state: 'visible', ...T });
+  await page.locator('ytmusic-player-queue-item, ytmusic-player-queue ytmusic-playlist-panel-video-renderer, ytmusic-playlist-panel-video-renderer').first()
+    .waitFor({ state: 'visible', ...T }).catch(() => {});
+  await page.waitForTimeout(800);
+}
 
 // Shared: hover a visible shelf track row and open its ⋮ Action menu (used by the
 // context-menu test and the dialogs that live behind it).

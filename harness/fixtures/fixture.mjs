@@ -14,6 +14,7 @@ const BLACK = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="256" h
 const browseMap = {
   FEmusic_home: 'browse-home', FEmusic_explore: 'browse-explore',
   FEmusic_moods_and_genres: 'browse-moods', FEmusic_library_landing: 'browse-library',
+  FEmusic_non_music_audio: 'browse-podcasts',
 };
 // Detail pages: browseId is per-entity, so map by PREFIX (any album/playlist/artist detail
 // request gets the corresponding fake detail fixture).
@@ -26,14 +27,17 @@ function browseFile(browseId) {
   return null;
 }
 
-function readBrowseId(req) {
+function readBody(req) {
   try {
     const buf = req.postDataBuffer();
     if (!buf) return null;
     let s; try { s = zlib.gunzipSync(buf).toString(); } catch { s = buf.toString('utf8'); }
-    return JSON.parse(s).browseId || null;
+    return JSON.parse(s);
   } catch { return null; }
 }
+const readBrowseId = (req) => readBody(req)?.browseId || null;
+// Sentinel query -> the "No results" empty-state fixture; any other query -> normal results.
+const EMPTY_QUERY = 'zzqxwvkjhgp0987xyz';
 
 export async function installFixture(context) {
   // youtubei API -> fake fixtures (unknown endpoints pass through: att/get, log_event, ...)
@@ -41,7 +45,7 @@ export async function installFixture(context) {
     const ep = new URL(route.request().url()).pathname.replace(/^\/youtubei\/v1\//, '');
     let file = null;
     if (ep === 'browse') file = browseFile(readBrowseId(route.request())) || 'browse-home';
-    else if (ep === 'search') file = 'search';
+    else if (ep === 'search') file = (readBody(route.request())?.query === EMPTY_QUERY) ? 'search-empty' : 'search';
     else if (ep === 'music/get_search_suggestions') file = 'search-suggestions';
     else if (ep === 'next') file = 'next';
     else if (ep === 'player') file = 'player';
@@ -76,7 +80,7 @@ export async function installFixture(context) {
   // surface via the browse/guide XHR — which the youtubei route above serves as fake.
   // Deterministic, and no fragile in-page hydration hooking. Scoped to the SPA document
   // routes (never youtubei), and only rewrites the main-frame document.
-  await context.route(/music\.youtube\.com\/(explore|library|moods_and_genres|search|settings|browse\/|playlist\?|channel\/|$|\?)/, async (route) => {
+  await context.route(/music\.youtube\.com\/(explore|library|moods_and_genres|search|settings|podcasts|browse\/|playlist\?|channel\/|$|\?)/, async (route) => {
     if (route.request().resourceType() !== 'document') return route.fallback();
     const resp = await route.fetch();
     const html = (await resp.text())
