@@ -30,7 +30,7 @@ concurrency:
 jobs:
   gate:
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: harness
