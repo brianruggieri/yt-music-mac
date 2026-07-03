@@ -11,6 +11,13 @@ const isSep = (t) => !t || /^[\s•&,·|/-]+$/.test(t);
 // fine for screenshots). Preserves the object identity so siblings stay intact.
 function setText(textObj, str) {
   if (textObj && Array.isArray(textObj.runs)) textObj.runs = [{ text: str }];
+  // Text objects carry their own precomputed a11y label with the ORIGINAL text (a rewritten
+  // subtitle still announced "Paramore • 18M views" / "Profile • @realhandle" — the security
+  // review's main leak). Rewriting only runs[] leaves that label; keep it in lockstep.
+  if (textObj && textObj.accessibility && textObj.accessibility.accessibilityData
+      && typeof textObj.accessibility.accessibilityData.label === 'string') {
+    textObj.accessibility.accessibilityData.label = str;
+  }
 }
 
 // Deterministic dealer: rolling index over a pool, stable across a fixed traversal.
@@ -62,6 +69,20 @@ export function transform(root, fake) {
     // scrub the pseudonymous session id that rides in responseContext (committed fixtures
     // shouldn't carry it); leave opaque trackingParams alone (load-bearing, non-personal).
     if (typeof node.visitorData === 'string') node.visitorData = '';
+    // feedbackTokens are session-bound action blobs from the real logged-in capture. Not
+    // replayable without the account's cookies, but a mock harness has no use for ~2k real
+    // ones — blank them (security review hygiene).
+    if (typeof node.feedbackToken === 'string') node.feedbackToken = '';
+    // The real typed search query rides in every result's searchEndpoint (filter chips,
+    // suggestions) — swap it for a fake in-universe query.
+    if (node.searchEndpoint && typeof node.searchEndpoint.query === 'string') node.searchEndpoint.query = 'nova sonder';
+    // player.json: streamingData holds signed googlevideo playback URLs that embed the
+    // CAPTURING CLIENT'S REAL PUBLIC IP (ip=..., percent-encoded inside signatureCipher —
+    // invisible to the host sweep) plus signatures; playbackTracking holds real session
+    // params (ei/plid/docid/referrer). Playback can't work against fixtures anyway (the
+    // signed URLs are IP-bound and expired) — drop both subtrees. [security review, Medium]
+    if (node.streamingData) delete node.streamingData;
+    if (node.playbackTracking) delete node.playbackTracking;
 
     // Strip lazy-load continuations: otherwise the SPA fires continuation XHRs (served the
     // same home again) and how many fire is timing-dependent -> variable layout -> flaky
@@ -119,7 +140,9 @@ export function transform(root, fake) {
       const r = node.musicMultiRowListItemRenderer, s = nextSong();
       const orig = firstRun(r.title);
       rename(orig, s.title);
+      rename(firstRun(r.secondTitle), `${s.artist} Radio Hour`);   // show name — real podcast titles leaked here
       setText(r.title, s.title);
+      setText(r.secondTitle, `${s.artist} Radio Hour`);
       setText(r.subtitle, `${s.artist} • Episode`);
       setText(r.description, 'A weekly session of new discoveries, deep cuts, and conversation from the studio.');
       setThumb(r, `${ASSET}/video/${slug(s.title)}.png`);
@@ -347,9 +370,16 @@ export function transform(root, fake) {
   // email address (e.g. the settings sign-out confirm "Name (user@gmail.com)") becomes the
   // fake identity — content-independent, so it works even where no rename was recorded.
   const EMAIL_LINE = /\S+@\S+\.\S+/;
+  // Channel handles ("@realhandle") are account-identifying and can appear in strings no
+  // rename covered (profile cards, about lines) — blanket-swap the handle shape. Ordered
+  // BEFORE the email check so "user@host.tld" (which also contains @) is judged as email.
+  const HANDLE = /(^|[\s(•·])@[A-Za-z0-9._-]{3,30}\b/gu;
   const fixStr = (s) => {
-    for (const [re, f] of pairs) if (re.test(s)) s = s.replace(re, f);
-    if (EMAIL_LINE.test(s)) s = `${fake.profile.name} (${fake.profile.email})`;
+    // plain replace only: a shared /g/ regex's .test() guard would advance lastIndex across
+    // strings (the footgun the review flagged); replace() resets it and no-ops on no match.
+    for (const [re, f] of pairs) s = s.replace(re, f);
+    if (EMAIL_LINE.test(s)) s = `${fake.profile.name} (${fake.profile.email})`;   // no /g/: stateless
+    else s = s.replace(HANDLE, `$1${fake.profile.handle}`);   // unconditional: replace() self-resets lastIndex
     return s;
   };
   (function scrub(n) {

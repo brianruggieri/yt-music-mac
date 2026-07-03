@@ -56,6 +56,15 @@ for (const [cap, name] of Object.entries(MAP)) {
   let json = JSON.stringify(out);
   const swept = (json.match(/https:\/\/[^"\\]*(ytimg\.com|googleusercontent\.com|ggpht\.com|gstatic\.com)[^"\\]*/g) || []).length;
   if (swept) json = json.replace(/https:\/\/[^"\\]*(ytimg\.com|googleusercontent\.com|ggpht\.com|gstatic\.com)[^"\\]*/g, 'https://fixture.invalid/art.png');
+  // Signed playback URLs (googlevideo) embed the capturing client's REAL IP, often
+  // percent-encoded inside signatureCipher where a https:// sweep can't see them. The
+  // transform drops streamingData/playbackTracking wholesale, so ANY survivor here means
+  // that fix regressed — fail loudly rather than sweep silently.
+  if (/googlevideo\.com|[?&]ip=\d+\.\d+\.\d+\.\d+/.test(json)) {
+    console.error(`✗ ${name}: googlevideo/client-IP material survived the transform — refusing to write`);
+    process.exitCode = 1;
+    continue;
+  }
   fs.writeFileSync(`${OUT}/${name}.json`, json);
   const titles = sampleTitles(out);
   console.log(`✓ ${name}  ${(a.length/1024|0)}KB${swept ? `  [swept ${swept} residual host url(s)]` : ''}  sample: ${titles.slice(0,4).join(' | ') || '(no item renderers)'}`);

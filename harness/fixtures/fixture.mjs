@@ -73,6 +73,9 @@ export async function installFixture(context) {
   // safety net: any real thumbnail host -> black square (covers any art we didn't rewrite)
   await context.route(/(yt3|lh3|i)\.(googleusercontent|ytimg|ggpht)\.com|yt3\.ggpht\.com|googleusercontent\.com/, (r) =>
     r.fulfill({ contentType: 'image/svg+xml', body: BLACK }));
+  // hermeticity: never let media playback escape to the real CDN during fixture runs
+  // (the transform drops streamingData, but YT's player may still probe googlevideo).
+  await context.route(/googlevideo\.com/, (r) => r.abort());
 
   // SSR neutralizer: home/explore/moods/guide ship inline in
   // ytcfg.set({YTMUSIC_INITIAL_DATA: initialData}) on cold load (no XHR to intercept).
