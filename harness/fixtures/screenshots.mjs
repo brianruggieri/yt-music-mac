@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadEngineScript } from '../lib/engine.js';
 import { installFixture } from './fixture.mjs';
+import { gotoPlayer, injectPlayerMedia, PLAYER_STATES } from '../lib/player-mock.js';
 
 const OUT = new URL('./screenshots/', import.meta.url);
 const BASE = 'https://music.youtube.com';
@@ -190,6 +191,16 @@ try {
           record(new URL(`${name}.png`, ROOT));
         } catch (e) { notes.push(`README ${name}.png not captured — ${e.message.split('\n')[0]}`); }
       }
+      // Now-playing states (album art / video / visualizer) — inject mock media into the real
+      // player page (see lib/player-mock.js). Headline images of the Song/Video/Visualizer modes.
+      try {
+        await gotoPlayer(hp, BASE);
+        for (const state of PLAYER_STATES) {
+          await injectPlayerMedia(hp, state);
+          await hp.screenshot({ path: fileURLToPath(new URL(`${state}.png`, ROOT)) });
+          record(new URL(`${state}.png`, ROOT));
+        }
+      } catch (e) { notes.push('player-state shots not captured — ' + e.message.split('\n')[0]); }
       await hctx.close();
     } catch (e) { notes.push('README images not refreshed — ' + e.message.split('\n')[0]); }
   }

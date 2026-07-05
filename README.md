@@ -28,7 +28,13 @@ The built-in light theme, across the app:
 |:-------:|:-------:|
 | ![Explore](screenshots/explore.png) | ![Library](screenshots/library.png) |
 
-Audio-reactive visualizer (Butterchurn / MilkDrop), a third option on the Song/Video toggle:
+**Now playing** — album art, music video, or an audio-reactive visualizer:
+
+| Album art | Video | Visualizer |
+|:---------:|:-----:|:----------:|
+| ![Album art](screenshots/player-song.png) | ![Video](screenshots/player-video.png) | ![Visualizer](screenshots/player-visualizer.png) |
+
+The Butterchurn (MilkDrop) visualizer, full-screen:
 
 ![Visualizer](screenshots/visualizer.png)
 
