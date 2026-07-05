@@ -19,11 +19,13 @@ A lightweight native macOS wrapper for YouTube Music with system integration.
 
 ## Screenshots
 
-![App](screenshots/youtube-app.png)
+The built-in light theme, across the app:
 
-| Control Center | Discord Rich Presence |
-|:--------------:|:---------------------:|
-| ![Control Center](screenshots/control-center.png) | ![Discord](screenshots/discord-status.png) |
+![Home](screenshots/youtube-app.png)
+
+| Explore | Library |
+|:-------:|:-------:|
+| ![Explore](screenshots/explore.png) | ![Library](screenshots/library.png) |
 
 ## Installation
 

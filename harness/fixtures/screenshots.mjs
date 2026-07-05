@@ -33,6 +33,21 @@ async function goHome(p) {
   await settle(p);
 }
 
+// Seed a now-playing track. A cold home load never populates the player bar (the fake rows
+// don't start playback and media is blocked), so navigate to a watch URL — the SPA fetches
+// next+player from the fixtures, filling the bar and rendering the full player page. Mirrors
+// screens.js openPlayerPage. Also hides the "media blocked" error toast (a harness-only
+// artifact — real playback never errors) so the marketing shots stay clean.
+async function seedPlayback(p) {
+  await p.goto(BASE + '/watch?v=dQw4w9WgXcQ', { waitUntil: 'commit' });
+  await p.waitForFunction(() => {
+    const t = document.querySelector('ytmusic-player-bar .content-info-wrapper .title');
+    return t && t.textContent.trim().length > 0;
+  }, { timeout: 15000 }).catch(() => {});
+  await p.addStyleTag({ content: 'tp-yt-paper-toast, ytmusic-notification-action-renderer, yt-notification-action-renderer { display: none !important; }' }).catch(() => {});
+  await settle(p);
+}
+
 // Click the first selector match that is actually visible (YTM ships hidden duplicate
 // controls for its fullscreen mode; `.first()` alone often grabs a 0-box ghost).
 async function clickFirstVisible(p, selector, opts = {}) {
@@ -59,7 +74,7 @@ const file = (n) => fileURLToPath(new URL(n, OUT));
 
 const b = await webkit.launch();
 const ctx = await b.newContext({
-  storageState: process.env.YTM_AUTH || './auth.json',
+  storageState: process.env.YTM_AUTH || undefined,   // fixtures fake all content — no real login needed
   colorScheme: 'light',
   viewport: { width: 1280, height: 800 },
 });
@@ -82,38 +97,23 @@ try {
     record(new URL(`${name}.png`, OUT));
   }
 
-  // 5: tight crop of just the now-playing bar (fake track "Coastline Signal").
-  await goHome(p);
+  // 5: tight crop of just the now-playing bar. Seed playback first (a cold home load
+  // never populates it — see seedPlayback).
+  await seedPlayback(p);
   {
-    const bar = p.locator('ytmusic-player-bar');
+    const bar = p.locator('ytmusic-player-bar:visible').first();
     try {
-      await bar.waitFor({ state: 'visible', timeout: 5000 });
+      await bar.waitFor({ state: 'visible', timeout: 8000 });
       await bar.screenshot({ path: file('05-now-playing-bar.png') });
       record(new URL('05-now-playing-bar.png', OUT));
-    } catch { notes.push('05: ytmusic-player-bar not visible — skipped'); }
+    } catch (e) { notes.push('05: player bar not visible — skipped (' + e.message.split('\n')[0] + ')'); }
   }
 
-  // 6: expanded player / now-playing page. Try the expand chevron (visible instance),
-  // fall back to the player-bar thumbnail — both toggle the full player page.
-  await goHome(p);
-  {
-    try {
-      let opened = await clickFirstVisible(
-        p,
-        'ytmusic-player-bar .toggle-player-page-button, button[aria-label*="player page" i], .expand-button',
-      );
-      if (!opened) opened = await clickFirstVisible(p, 'ytmusic-player-bar img.image');
-      if (!opened) throw new Error('no visible expand trigger');
-      await p.waitForFunction(() => {
-        const e = document.querySelector('ytmusic-player-page');
-        return e && e.getBoundingClientRect().height > 200;
-      }, { timeout: 5000 });
-      await p.waitForTimeout(1000);
-      await settle(p);
-      await p.screenshot({ path: file('06-expanded-player.png') });
-      record(new URL('06-expanded-player.png', OUT));
-    } catch (e) { notes.push('06: expanded player did not open — skipped (' + e.message.split('\n')[0] + ')'); }
-  }
+  // (No expanded-player marketing shot: under the hermetic fixture the player page's main
+  // media region is a blocked <video> that renders as a blank box in light — not
+  // marketing-quality. Shot 05 (now-playing bar crop) covers "playback" for the showcase,
+  // and regression covers the player page functionally via modal:player-page. Restore this
+  // if the fixture is ever taught to render album art in Song mode.)
 
   // 7: account menu (should render "Alex Rivera").
   await goHome(p);
@@ -148,6 +148,41 @@ try {
       await p.screenshot({ path: file('08-track-menu.png') });
       record(new URL('08-track-menu.png', OUT));
     } catch { notes.push('08: track action menu did not open — skipped'); }
+  }
+
+  // Committed README images (repo-root screenshots/): crisp 2x light-theme captures the README
+  // embeds. Generator-emitted (not hand-captured) so `npm run screenshots` keeps them in sync
+  // with the theme, and fixture identity (Alex Rivera) so there's no real data. These REPLACE
+  // the inherited upstream captures, which were dark-theme AND showed a real account's library
+  // (the Control Center / Discord shots were also that account's — OS-level UI this hermetic
+  // harness can't reproduce; recapture manually if you want to showcase those features).
+  {
+    const ROOT = new URL('../../screenshots/', import.meta.url);
+    try {
+      const hctx = await b.newContext({
+        storageState: process.env.YTM_AUTH || undefined,
+        colorScheme: 'light',
+        viewport: { width: 1312, height: 912 },
+        deviceScaleFactor: 2,
+      });
+      await installFixture(hctx);
+      await hctx.addInitScript({ content: ENGINE });
+      const hp = await hctx.newPage();
+      for (const [name, path] of [
+        ['youtube-app', '/'],       // README hero (home)
+        ['explore', '/explore'],
+        ['library', '/library'],
+      ]) {
+        try {
+          await hp.goto(BASE + path, { waitUntil: 'commit' });
+          await hp.waitForTimeout(6500);
+          await settle(hp);
+          await hp.screenshot({ path: fileURLToPath(new URL(`${name}.png`, ROOT)) });
+          record(new URL(`${name}.png`, ROOT));
+        } catch (e) { notes.push(`README ${name}.png not captured — ${e.message.split('\n')[0]}`); }
+      }
+      await hctx.close();
+    } catch (e) { notes.push('README images not refreshed — ' + e.message.split('\n')[0]); }
   }
 
   // Content / PII check: on home the page text should carry the fake identity, never a real name.
