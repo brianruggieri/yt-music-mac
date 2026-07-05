@@ -24,6 +24,15 @@ async function settle(p) {
     );
   } catch { notes.push('engine did not report data-ytm-mode=light within 8s (continuing)'); }
   await p.waitForTimeout(700);
+  // Suppress the engine's :focus-visible ring. The shots that open a menu (account, track ⋮)
+  // do it programmatically, which leaves a keyboard-focus ring a mouse user never sees — it
+  // just uglifies the marketing image. Persistent style tag, so it also covers menus opened
+  // after this call. Same high-specificity reset the test harness uses (out-specifies the
+  // engine's scoped `html[data-ytm-mode="light"] [tabindex]:focus-visible`).
+  await p.addStyleTag({
+    content: 'html[data-ytm-mode][data-ytm-mode][data-ytm-mode] *:focus-visible,' +
+             'html[data-ytm-mode][data-ytm-mode][data-ytm-mode] *:focus { outline: none !important; }',
+  }).catch(() => {});
 }
 
 async function goHome(p) {
