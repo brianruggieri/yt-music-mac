@@ -37,10 +37,13 @@ export async function gotoPlayer(page, base) {
 // Inject the mock media for `state` into the player's media stage (append INTO the media element
 // so it's transform-proof; no toggle click, which would load a real video ad).
 export async function injectPlayerMedia(page, state) {
-  await page.evaluate((m) => {
+  await page.evaluate(async (m) => {
     document.getElementById('mock-stage')?.remove();
     const media = document.querySelector('ytmusic-player');
-    if (!media) return;
+    // Fail LOUD if the stage is gone (a YT DOM change) — a silent return would let the
+    // marketing generator / regression suite capture an un-mocked stage and bake it into a
+    // "passing" baseline. Callers surface the throw (test skip / generator note).
+    if (!media) throw new Error('injectPlayerMedia: player media stage (ytmusic-player) not found');
     media.style.position = 'relative';
     const host = document.createElement('div');
     host.id = 'mock-stage';
@@ -57,6 +60,15 @@ export async function injectPlayerMedia(page, state) {
       host.appendChild(img);
     }
     media.appendChild(host);
+    // Wait for the injected images to actually load + decode before returning, so the
+    // screenshot can't capture a blank/partial stage under load (the fixed timeout below is
+    // just a paint settle, not the load guarantee).
+    await Promise.all([...host.querySelectorAll('img')].map((img) => {
+      const loaded = (img.complete && img.naturalWidth > 0)
+        ? Promise.resolve()
+        : new Promise((res) => { img.onload = res; img.onerror = res; });
+      return loaded.then(() => (img.decode ? img.decode().catch(() => {}) : null));
+    }));
   }, MEDIA[state]);
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(300);
 }
