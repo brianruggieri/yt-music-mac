@@ -107,21 +107,26 @@ export const INTERACTIONS = [
   // player page's Up-Next/queue + the Song/Video toggle ARE covered by `player-page` above.
 ];
 
-// Shared: start playback (click a track) and expand to the full now-playing player page.
+// Shared: open the full now-playing player page by seeding playback via a watch URL.
+// A cold content-page load can't start playback here — the fake home rows aren't wired to
+// initiate it and media requests are aborted (googlevideo is blocked for hermeticity), so
+// clicking a row never populates the now-playing bar (the old approach, which silently timed
+// out and skipped this screen). Navigating straight to /watch makes the SPA fetch next+player
+// (both served by the fixture), which populates the player bar AND renders the player page.
 async function openPlayerPage(page) {
-  const row = page.locator('ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer, ytmusic-carousel-shelf-renderer ytmusic-responsive-list-item-renderer')
-    .filter({ visible: true }).first();
-  await row.scrollIntoViewIfNeeded(T);
-  await row.click(T);
+  await page.goto(BASE + '/watch?v=dQw4w9WgXcQ', { waitUntil: 'commit' });
   await page.waitForFunction(() => {
     const t = document.querySelector('ytmusic-player-bar .content-info-wrapper .title');
     return t && t.textContent.trim().length > 0;
   }, null, { timeout: 15_000 });
-  const triggers = page.locator('ytmusic-player-bar .toggle-player-page-button, ytmusic-player-bar button[aria-label*="player page" i], ytmusic-player-bar .expand-button, ytmusic-player-bar img.image');
-  const n = await triggers.count();
-  for (let i = 0; i < n; i++) {
-    const t = triggers.nth(i);
-    if (await t.isVisible().catch(() => false)) { await t.click({ force: true, ...T }); break; }
+  // /watch usually opens the full player page; if it didn't, expand it from the bar.
+  if (!(await page.locator('ytmusic-player-page').first().isVisible().catch(() => false))) {
+    const triggers = page.locator('ytmusic-player-bar .toggle-player-page-button, ytmusic-player-bar button[aria-label*="player page" i], ytmusic-player-bar .expand-button, ytmusic-player-bar img.image');
+    const n = await triggers.count();
+    for (let i = 0; i < n; i++) {
+      const t = triggers.nth(i);
+      if (await t.isVisible().catch(() => false)) { await t.click({ force: true, ...T }); break; }
+    }
   }
   await page.locator('ytmusic-player-page').first().waitFor({ state: 'visible', ...T });
   await page.locator('ytmusic-player-queue-item, ytmusic-player-queue ytmusic-playlist-panel-video-renderer, ytmusic-playlist-panel-video-renderer').first()

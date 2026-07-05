@@ -39,7 +39,16 @@ const readBrowseId = (req) => readBody(req)?.browseId || null;
 // Sentinel query -> the "No results" empty-state fixture; any other query -> normal results.
 const EMPTY_QUERY = 'zzqxwvkjhgp0987xyz';
 
-export async function installFixture(context) {
+// Endpoints YT gates behind an attestation check (see the `att/get` BotGuard call fired
+// alongside them): under WebKit, Playwright's context.route/page.route NEVER see these
+// requests at the network layer (confirmed with a wildcard page.route('**/*') — it simply
+// isn't in the intercepted stream), so they fall through to the real music.youtube.com and
+// 401 with no session cookie. That's a regression in YT's own gating, not this harness —
+// route-based fixturing can't reach it. Patch window.fetch itself (in-page, pre-network) for
+// just this one endpoint instead; see installFixture's `page` param below.
+const ATTESTED_ENDPOINT = '/youtubei/v1/playlist/get_add_to_playlist';
+
+export async function installFixture(context, page) {
   // youtubei API -> fake fixtures (unknown endpoints pass through: att/get, log_event, ...)
   await context.route(/youtubei\/v1\//, async (route) => {
     const ep = new URL(route.request().url()).pathname.replace(/^\/youtubei\/v1\//, '');
@@ -83,7 +92,7 @@ export async function installFixture(context) {
   // surface via the browse/guide XHR — which the youtubei route above serves as fake.
   // Deterministic, and no fragile in-page hydration hooking. Scoped to the SPA document
   // routes (never youtubei), and only rewrites the main-frame document.
-  await context.route(/music\.youtube\.com\/(explore|library|moods_and_genres|search|settings|podcasts|browse\/|playlist\?|channel\/|$|\?)/, async (route) => {
+  await context.route(/music\.youtube\.com\/(explore|library|moods_and_genres|search|settings|podcasts|watch|browse\/|playlist\?|channel\/|$|\?)/, async (route) => {
     if (route.request().resourceType() !== 'document') return route.fallback();
     const resp = await route.fetch();
     const html = (await resp.text())
@@ -94,4 +103,21 @@ export async function installFixture(context) {
       .replace('"LOGGED_IN":false', '"LOGGED_IN":true');
     return route.fulfill({ response: resp, body: html });
   });
+
+  // Fetch-level fallback for the attested endpoint (see ATTESTED_ENDPOINT comment above):
+  // route.mjs can't reach it, so patch window.fetch in-page instead, before any app script
+  // runs. Only opted into when a `page` is passed (currently just the add-to-playlist test).
+  if (page) {
+    const body = load('add-to-playlist').toString('utf8');
+    await page.addInitScript(([endpoint, json]) => {
+      const orig = window.fetch;
+      window.fetch = function (input, init) {
+        const url = typeof input === 'string' ? input : input?.url || '';
+        if (url.includes(endpoint)) {
+          return Promise.resolve(new Response(json, { status: 200, headers: { 'content-type': 'application/json' } }));
+        }
+        return orig.apply(this, arguments);
+      };
+    }, [ATTESTED_ENDPOINT, body]);
+  }
 }
