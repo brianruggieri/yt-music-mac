@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadEngineScript } from '../lib/engine.js';
 import { installFixture } from './fixture.mjs';
+import { gotoPlayer, injectPlayerMedia, PLAYER_STATES } from '../lib/player-mock.js';
 
 const OUT = new URL('./screenshots/', import.meta.url);
 const BASE = 'https://music.youtube.com';
@@ -24,12 +25,36 @@ async function settle(p) {
     );
   } catch { notes.push('engine did not report data-ytm-mode=light within 8s (continuing)'); }
   await p.waitForTimeout(700);
+  // Suppress the engine's :focus-visible ring. The shots that open a menu (account, track ⋮)
+  // do it programmatically, which leaves a keyboard-focus ring a mouse user never sees — it
+  // just uglifies the marketing image. Persistent style tag, so it also covers menus opened
+  // after this call. Same high-specificity reset the test harness uses (out-specifies the
+  // engine's scoped `html[data-ytm-mode="light"] [tabindex]:focus-visible`).
+  await p.addStyleTag({
+    content: 'html[data-ytm-mode][data-ytm-mode][data-ytm-mode] *:focus-visible,' +
+             'html[data-ytm-mode][data-ytm-mode][data-ytm-mode] *:focus { outline: none !important; }',
+  }).catch(() => {});
 }
 
 async function goHome(p) {
   await p.goto(BASE + '/', { waitUntil: 'commit' });
   await p.waitForSelector('ytmusic-player-bar', { timeout: 10000 }).catch(() => {});
   await p.waitForTimeout(6500);
+  await settle(p);
+}
+
+// Seed a now-playing track. A cold home load never populates the player bar (the fake rows
+// don't start playback and media is blocked), so navigate to a watch URL — the SPA fetches
+// next+player from the fixtures, filling the bar and rendering the full player page. Mirrors
+// screens.js openPlayerPage. Also hides the "media blocked" error toast (a harness-only
+// artifact — real playback never errors) so the marketing shots stay clean.
+async function seedPlayback(p) {
+  await p.goto(BASE + '/watch?v=dQw4w9WgXcQ', { waitUntil: 'commit' });
+  await p.waitForFunction(() => {
+    const t = document.querySelector('ytmusic-player-bar .content-info-wrapper .title');
+    return t && t.textContent.trim().length > 0;
+  }, { timeout: 15000 }).catch(() => {});
+  await p.addStyleTag({ content: 'tp-yt-paper-toast, ytmusic-notification-action-renderer, yt-notification-action-renderer { display: none !important; }' }).catch(() => {});
   await settle(p);
 }
 
@@ -59,7 +84,7 @@ const file = (n) => fileURLToPath(new URL(n, OUT));
 
 const b = await webkit.launch();
 const ctx = await b.newContext({
-  storageState: process.env.YTM_AUTH || './auth.json',
+  storageState: process.env.YTM_AUTH || undefined,   // fixtures fake all content — no real login needed
   colorScheme: 'light',
   viewport: { width: 1280, height: 800 },
 });
@@ -82,38 +107,23 @@ try {
     record(new URL(`${name}.png`, OUT));
   }
 
-  // 5: tight crop of just the now-playing bar (fake track "Coastline Signal").
-  await goHome(p);
+  // 5: tight crop of just the now-playing bar. Seed playback first (a cold home load
+  // never populates it — see seedPlayback).
+  await seedPlayback(p);
   {
-    const bar = p.locator('ytmusic-player-bar');
+    const bar = p.locator('ytmusic-player-bar:visible').first();
     try {
-      await bar.waitFor({ state: 'visible', timeout: 5000 });
+      await bar.waitFor({ state: 'visible', timeout: 8000 });
       await bar.screenshot({ path: file('05-now-playing-bar.png') });
       record(new URL('05-now-playing-bar.png', OUT));
-    } catch { notes.push('05: ytmusic-player-bar not visible — skipped'); }
+    } catch (e) { notes.push('05: player bar not visible — skipped (' + e.message.split('\n')[0] + ')'); }
   }
 
-  // 6: expanded player / now-playing page. Try the expand chevron (visible instance),
-  // fall back to the player-bar thumbnail — both toggle the full player page.
-  await goHome(p);
-  {
-    try {
-      let opened = await clickFirstVisible(
-        p,
-        'ytmusic-player-bar .toggle-player-page-button, button[aria-label*="player page" i], .expand-button',
-      );
-      if (!opened) opened = await clickFirstVisible(p, 'ytmusic-player-bar img.image');
-      if (!opened) throw new Error('no visible expand trigger');
-      await p.waitForFunction(() => {
-        const e = document.querySelector('ytmusic-player-page');
-        return e && e.getBoundingClientRect().height > 200;
-      }, { timeout: 5000 });
-      await p.waitForTimeout(1000);
-      await settle(p);
-      await p.screenshot({ path: file('06-expanded-player.png') });
-      record(new URL('06-expanded-player.png', OUT));
-    } catch (e) { notes.push('06: expanded player did not open — skipped (' + e.message.split('\n')[0] + ')'); }
-  }
+  // (No expanded-player marketing shot: under the hermetic fixture the player page's main
+  // media region is a blocked <video> that renders as a blank box in light — not
+  // marketing-quality. Shot 05 (now-playing bar crop) covers "playback" for the showcase,
+  // and regression covers the player page functionally via modal:player-page. Restore this
+  // if the fixture is ever taught to render album art in Song mode.)
 
   // 7: account menu (should render "Alex Rivera").
   await goHome(p);
@@ -148,6 +158,94 @@ try {
       await p.screenshot({ path: file('08-track-menu.png') });
       record(new URL('08-track-menu.png', OUT));
     } catch { notes.push('08: track action menu did not open — skipped'); }
+  }
+
+  // Committed README images (repo-root screenshots/): crisp 2x light-theme captures the README
+  // embeds. Generator-emitted (not hand-captured) so `npm run screenshots` keeps them in sync
+  // with the theme, and fixture identity (Alex Rivera) so there's no real data. These REPLACE
+  // the inherited upstream captures, which were dark-theme AND showed a real account's library
+  // (the Control Center / Discord shots were also that account's — OS-level UI this hermetic
+  // harness can't reproduce; recapture manually if you want to showcase those features).
+  {
+    const ROOT = new URL('../../screenshots/', import.meta.url);
+    try {
+      const hctx = await b.newContext({
+        storageState: process.env.YTM_AUTH || undefined,
+        colorScheme: 'light',
+        viewport: { width: 1312, height: 912 },
+        deviceScaleFactor: 2,
+      });
+      await installFixture(hctx);
+      await hctx.addInitScript({ content: ENGINE });
+      const hp = await hctx.newPage();
+      for (const [name, path] of [
+        ['youtube-app', '/'],       // README hero (home)
+        ['explore', '/explore'],
+        ['library', '/library'],
+      ]) {
+        try {
+          await hp.goto(BASE + path, { waitUntil: 'commit' });
+          await hp.waitForTimeout(6500);
+          await settle(hp);
+          await hp.screenshot({ path: fileURLToPath(new URL(`${name}.png`, ROOT)) });
+          record(new URL(`${name}.png`, ROOT));
+        } catch (e) { notes.push(`README ${name}.png not captured — ${e.message.split('\n')[0]}`); }
+      }
+      // Now-playing states (album art / video / visualizer) — inject mock media into the real
+      // player page (see lib/player-mock.js). Headline images of the Song/Video/Visualizer modes.
+      try {
+        await gotoPlayer(hp, BASE);
+        for (const state of PLAYER_STATES) {
+          await injectPlayerMedia(hp, state);
+          await hp.screenshot({ path: fileURLToPath(new URL(`${state}.png`, ROOT)) });
+          record(new URL(`${state}.png`, ROOT));
+        }
+      } catch (e) { notes.push('player-state shots not captured — ' + e.message.split('\n')[0]); }
+      await hctx.close();
+    } catch (e) { notes.push('README images not refreshed — ' + e.message.split('\n')[0]); }
+  }
+
+  // Visualizer marketing shot (screenshots/visualizer.png): render the app's vendored
+  // Butterchurn + a preset headlessly. Headless WebKit has no AudioWorklet (the app's native
+  // PCM path), so drive Butterchurn directly with a synthetic noise source — same engine and
+  // preset pack the app ships, so the visual is what users see fullscreen. The bloom is
+  // non-deterministic (fine for a marketing image); the preset is one that reads well.
+  {
+    const VIZ = new URL('../../youtube-music-player/Resources/visualizer/', import.meta.url);
+    const vf = (n) => fileURLToPath(new URL(n, VIZ));
+    try {
+      const vctx = await b.newContext({ viewport: { width: 1312, height: 912 }, deviceScaleFactor: 2 });
+      const vp = await vctx.newPage();
+      await vp.goto('data:text/html,<html><body style="margin:0;background:%23000"></body></html>');
+      await vp.addScriptTag({ path: vf('butterchurn.min.js') });
+      await vp.addScriptTag({ path: vf('butterchurnPresets.min.js') });
+      await vp.evaluate(async () => {
+        const canvas = document.createElement('canvas');
+        canvas.style.cssText = 'display:block;width:100vw;height:100vh;';
+        canvas.width = 2624; canvas.height = 1824;
+        document.body.appendChild(canvas);
+        const bc = window.butterchurn.default || window.butterchurn;
+        const bp = window.butterchurnPresets.default || window.butterchurnPresets;
+        const actx = new (window.AudioContext || window.webkitAudioContext)();
+        try { await actx.resume(); } catch {}
+        const buf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let j = 0; j < d.length; j++) d[j] = (Math.random() * 2 - 1) * 0.28;
+        const srcN = actx.createBufferSource(); srcN.buffer = buf; srcN.loop = true;
+        const gain = actx.createGain(); gain.gain.value = 0.5; srcN.connect(gain);
+        const viz = bc.createVisualizer(actx, canvas, { width: 2624, height: 1824, pixelRatio: 1 });
+        viz.connectAudio(gain); srcN.start();
+        const presets = bp.getPresets();
+        const name = presets['Flexi - infused with the spiral'] ? 'Flexi - infused with the spiral' : Object.keys(presets)[0];
+        viz.loadPreset(presets[name], 0);
+        window.__viz = viz;
+        let n = 0; (function loop() { if (n++ > 100000) return; window.__viz.render(); requestAnimationFrame(loop); })();
+      });
+      await vp.waitForTimeout(3500);
+      await vp.screenshot({ path: fileURLToPath(new URL('../../screenshots/visualizer.png', import.meta.url)) });
+      record(new URL('../../screenshots/visualizer.png', import.meta.url));
+      await vctx.close();
+    } catch (e) { notes.push('visualizer.png not captured — ' + e.message.split('\n')[0]); }
   }
 
   // Content / PII check: on home the page text should carry the fake identity, never a real name.

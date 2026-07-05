@@ -14,7 +14,7 @@ test.beforeEach(async ({ page, context }) => {
   // Deterministic fake fixtures by default (frozen content → stable screenshots, no PII,
   // reliable modal triggers). Set YTM_LIVE=1 to run against real music.youtube.com (the
   // old canary mode — catches YT redesigns, but rotates content and can flaky-skip modals).
-  if (!process.env.YTM_LIVE) await installFixture(context);
+  if (!process.env.YTM_LIVE) await installFixture(context, page);
   await page.addInitScript({ content: ENGINE });
 });
 
@@ -32,6 +32,23 @@ async function settle(page, mode) {
   await page.waitForSelector('ytmusic-carousel-shelf-renderer, ytmusic-shelf-renderer, ytmusic-responsive-list-item-renderer, ytmusic-two-row-item-renderer', { timeout: 15_000 }).catch(() => {});
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(1500);
+  // Neutralize the engine's :focus-visible ring for STABLE baselines. The harness opens
+  // menus/dialogs programmatically, which leaves a keyboard-focus ring that (a) a real
+  // MOUSE user never sees and (b) only renders in light (the engine is light-only), so it
+  // shows up as a spurious light-vs-dark diff on the modal snapshots. The ring stays in the
+  // shipped app for keyboard users — we just don't photograph it. Higher-specificity and
+  // later in the DOM than the engine's rule, so `outline: none` wins.
+  // Kill the engine's :focus-visible ring for STABLE baselines: it's a keyboard-focus
+  // indicator a mouse user never triggers, it only renders in light (engine is light-only),
+  // and it lands nondeterministically at capture time — a flaky light-vs-dark diff. The app
+  // keeps the ring for real keyboard users; we just don't photograph it. The engine SCOPES
+  // its focus rules as `html[data-ytm-mode="light"] [tabindex]:focus-visible` (specificity
+  // 0,3,1) and appends its sheet LAST in <html>, so a plain reset loses on specificity AND
+  // source order. Repeat the html attribute to reach (0,4,1) and win outright.
+  await page.addStyleTag({
+    content: 'html[data-ytm-mode][data-ytm-mode][data-ytm-mode] *:focus-visible,' +
+             'html[data-ytm-mode][data-ytm-mode][data-ytm-mode] *:focus { outline: none !important; }',
+  }).catch(() => {});
 }
 
 function report(screen, failures) {

@@ -9,6 +9,7 @@ A lightweight native macOS wrapper for YouTube Music with system integration.
 ## Features
 
 - **Native macOS app** — No Electron, just a lean WebKit wrapper
+- **Light theme** — YouTube Music ships dark-only; this adds a full light theme derived at runtime from YT's own design tokens (so it self-heals across UI changes), with a crossfading dark/light toggle
 - **Media key support** — Control playback with your keyboard's play/pause, next, and previous keys
 - **Now Playing integration** — See track info in Control Center with album artwork
 - **Discord Rich Presence** — Show what you're listening to on Discord
@@ -19,11 +20,23 @@ A lightweight native macOS wrapper for YouTube Music with system integration.
 
 ## Screenshots
 
-![App](screenshots/youtube-app.png)
+The built-in light theme, across the app:
 
-| Control Center | Discord Rich Presence |
-|:--------------:|:---------------------:|
-| ![Control Center](screenshots/control-center.png) | ![Discord](screenshots/discord-status.png) |
+![Home](screenshots/youtube-app.png)
+
+| Explore | Library |
+|:-------:|:-------:|
+| ![Explore](screenshots/explore.png) | ![Library](screenshots/library.png) |
+
+**Now playing** — album art, music video, or an audio-reactive visualizer:
+
+| Album art | Video | Visualizer |
+|:---------:|:-----:|:----------:|
+| ![Album art](screenshots/player-song.png) | ![Video](screenshots/player-video.png) | ![Visualizer](screenshots/player-visualizer.png) |
+
+The Butterchurn (MilkDrop) visualizer, full-screen:
+
+![Visualizer](screenshots/visualizer.png)
 
 ## Installation
 

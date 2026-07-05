@@ -2,6 +2,8 @@
 // for the modal/menu/popup surfaces that only exist after a click. Add entries here
 // to expand coverage — this list IS the "do we have all screens defined?" answer.
 
+import { gotoPlayer, injectPlayerMedia, PLAYER_STATES } from './lib/player-mock.js';
+
 export const BASE = 'https://music.youtube.com';
 
 // Route-reachable screens (no interaction needed).
@@ -96,38 +98,22 @@ export const INTERACTIONS = [
   // rendered from a static DOM fixture (needs YT's full Polymer runtime). The engine DOES
   // theme it (LightThemeEngine cropper block, confirmed in manual QA); like the native macOS
   // chrome it stays on manual QA. Left un-gated on purpose rather than shipping a false pass.
-  {
-    name: 'player-page',
+  // The 3 now-playing states (album art / video / visualizer). The harness can't render real
+  // playback, video, or the native visualizer, so each opens the real player page and injects
+  // deterministic fixture media into the stage (see lib/player-mock.js). This gates the player
+  // page CHROME + theming in each mode, in both themes.
+  ...PLAYER_STATES.map((state) => ({
+    name: state,
     path: '/',
-    async open(page) { await openPlayerPage(page); },
-  },
+    async open(page) {
+      await gotoPlayer(page, BASE);
+      await injectPlayerMedia(page, state);
+    },
+  })),
   // NOTE: the player LYRICS and RELATED tabs fetch per-track via browse(MPLY…/MPTR…), but that
   // in-SPA fetch isn't reliably intercepted by the fixture route (real, copyrighted lyrics leak
-  // into the render), so they're left un-gated rather than baselined with real content. The
-  // player page's Up-Next/queue + the Song/Video toggle ARE covered by `player-page` above.
+  // into the render), so they're left un-gated rather than baselined with real content.
 ];
-
-// Shared: start playback (click a track) and expand to the full now-playing player page.
-async function openPlayerPage(page) {
-  const row = page.locator('ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer, ytmusic-carousel-shelf-renderer ytmusic-responsive-list-item-renderer')
-    .filter({ visible: true }).first();
-  await row.scrollIntoViewIfNeeded(T);
-  await row.click(T);
-  await page.waitForFunction(() => {
-    const t = document.querySelector('ytmusic-player-bar .content-info-wrapper .title');
-    return t && t.textContent.trim().length > 0;
-  }, null, { timeout: 15_000 });
-  const triggers = page.locator('ytmusic-player-bar .toggle-player-page-button, ytmusic-player-bar button[aria-label*="player page" i], ytmusic-player-bar .expand-button, ytmusic-player-bar img.image');
-  const n = await triggers.count();
-  for (let i = 0; i < n; i++) {
-    const t = triggers.nth(i);
-    if (await t.isVisible().catch(() => false)) { await t.click({ force: true, ...T }); break; }
-  }
-  await page.locator('ytmusic-player-page').first().waitFor({ state: 'visible', ...T });
-  await page.locator('ytmusic-player-queue-item, ytmusic-player-queue ytmusic-playlist-panel-video-renderer, ytmusic-playlist-panel-video-renderer').first()
-    .waitFor({ state: 'visible', ...T }).catch(() => {});
-  await page.waitForTimeout(800);
-}
 
 // Shared: hover a visible shelf track row and open its ⋮ Action menu (used by the
 // context-menu test and the dialogs that live behind it).

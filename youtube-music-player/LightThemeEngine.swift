@@ -216,6 +216,17 @@ enum LightThemeEngine {
             // …and a white raised pill on whichever segment YT's playback-mode marks selected.
             ['ytmusic-av-toggle[playback-mode="ATV_PREFERRED"] .av-toggle:not(.milkviz-styled) button.song-button, ytmusic-av-toggle[playback-mode="OMV_PREFERRED"] .av-toggle:not(.milkviz-styled) button.video-button',
                 'background-color: rgb(255, 255, 255); box-shadow: 0 1px 2px rgba(0,0,0,0.2)'],
+            // Settings / player-page ON toggles (tp-yt-paper-toggle-button). Dark mode marks
+            // the "on" state with a blue bar + knob, but YT's checked colours are white-based
+            // Polymer tokens that the generic inversion flips to a grey track + BLACK knob — so
+            // "on" and "off" look nearly identical in light (the blue affordance is lost; #19
+            // review caught it on Settings + the Autoplay toggle). Re-pin the checked custom
+            // props to a Material accent — translucent-blue track, solid-blue knob — mirroring
+            // dark's on-state. Only the [checked] host is targeted, so the "off" state stays
+            // grey and the two remain distinguishable. Blue (not brand red) so it never reads
+            // as "playing", consistent with the focus-ring colour choice.
+            ['tp-yt-paper-toggle-button[checked], paper-toggle-button[checked]',
+                '--paper-toggle-button-checked-bar-color: rgba(26,115,232,0.5); --paper-toggle-button-checked-button-color: rgb(26,115,232); --paper-toggle-button-checked-ink-color: rgba(26,115,232,0.3)'],
             // Modal scrim (tp-yt-iron-overlay-backdrop — the dimming layer behind every
             // dialog: edit-playlist, add-to-playlist, etc.). YT colours it from an inverted
             // iron/paper token, so in light mode it flips to near-WHITE — clicking a dialog
@@ -242,6 +253,13 @@ enum LightThemeEngine {
             // through. Give it an opaque card (text/✕ are already dark).
             ['tp-yt-paper-dialog:has(ytmusic-dismissable-dialog-renderer)',
                 'background-color: rgb(255, 255, 255); box-shadow: 0 1px 2px rgba(0,0,0,0.2)'],
+            // Share dialog (#19 review): ytmusic-unified-share-panel-renderer sits in a
+            // tp-yt-paper-dialog whose surface token is alpha-0 in light, so the page content
+            // behind ghosts THROUGH and overlaps the dialog's own title / share icons / URL
+            // row — unreadable. Exact same transparent-dialog class as the two above; give it
+            // the same opaque light card.
+            ['tp-yt-paper-dialog:has(ytmusic-unified-share-panel-renderer)',
+                'background-color: rgb(255, 255, 255); box-shadow: 0 1px 2px rgba(0,0,0,0.2)'],
             // …and its close ✕ glyph: YT draws it white (for the dark fallback surface), so on
             // the white card above it vanished. Pin the dialog's icons dark — including the
             // svg <path> (its white comes from the path's own fill), so the ✕ shows.
@@ -265,6 +283,12 @@ enum LightThemeEngine {
             // can flip with a stylesheet rule; the surface is pinned inline (pinMenu)
             // because the Material `background: var()` rule beats our scoped !important.
             ['.ytmusicMultiPageMenuRendererHost yt-formatted-string, .ytmusicMultiPageMenuRendererHost .yt-core-attributed-string, .ytmusicMultiPageMenuRendererHost yt-icon, .ytmusicMultiPageMenuRendererHost #label', 'color: rgb(20, 20, 20)'],
+            // …but the account header's "Manage your Google Account" IS a link (#19 review): the
+            // blanket dark-text pin above flattens it to grey so it stops reading as a link.
+            // Restore a link colour — an AA-safe darker blue (#0b57d0 ≈ 6:1 on the light menu,
+            // where #1a73e8 is only ~4.5:1 and risks the contrast gate). More specific than the
+            // pin above (adds the a.yt-simple-endpoint), so it wins on this one element.
+            ['.ytmusicMultiPageMenuRendererHost a.yt-simple-endpoint', 'color: #0b57d0'],
             // Track-row context menu (ytmusic-menu-popup-renderer): its service-item icons
             // are svgs YT fills white through the Material var chain, which the token
             // inversion can't reach — white-on-#DEDEDE is 1.35:1 (fails WCAG 1.4.11). Pin
@@ -307,6 +331,13 @@ enum LightThemeEngine {
             // card surfaces still get a hairline via auditSurfaces() — that's unaffected.)
             ['ytmusic-carousel-shelf-renderer, ytmusic-shelf-renderer',
                 'border-color: rgba(0,0,0,0.08)'],
+            // Search "top result" hero (ytmusic-card-shelf-renderer): dark mode gives it a raised
+            // darker-grey card, but its light bg is transparent (alpha 0) with no radius/border, so
+            // the card boundary vanishes on the light page and auditSurfaces() skips it (no opaque
+            // fill to detect). #19 review flagged the lost grouping. Give it a defined card: a
+            // subtle fill + inset hairline ring + rounded corners, matching the nav/tonal buttons.
+            ['ytmusic-card-shelf-renderer',
+                'background-color: rgba(0,0,0,0.035); border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10)'],
             // Unselected category chips: defined outlined pills so they read as
             // buttons (a subtle fill + visible hairline border over YT's rounded
             // shape, with the inverted dark label). The selected chip keeps YT's
@@ -398,6 +429,14 @@ enum LightThemeEngine {
                 'color: rgb(255,255,255)'],
             ['yt-checkbox-renderer[aria-checked="true"] yt-icon, yt-checkbox-renderer[aria-checked="true"] svg',
                 'color: rgb(13,13,13); fill: rgb(13,13,13)'],
+            // Add-to-playlist rows' "N tracks" subtitles (#19 review): the runtime text-rescue
+            // darkens the rows that FAIL 4.5:1 up to the ~7:1 READABLE target, but a subtitle that
+            // already sits just past 4.5:1 (e.g. "4 tracks") is left untouched — so it reads a shade
+            // lighter than its rescued siblings and looks washed out. Pin them all to one uniform
+            // dark grey (the same rgb(82,82,82) the bylines use) at the cascade level so the rescue's
+            // per-row variance can't show. Scoped to the dialog's subtitle, so titles stay black.
+            ['ytmusic-add-to-playlist-renderer yt-formatted-string.subtitle, ytmusic-playlist-add-to-option-renderer yt-formatted-string.subtitle',
+                'color: rgb(82,82,82)'],
         ];
 
         // Brand red, used on purpose in a FEW active/hover places so it keeps meaning

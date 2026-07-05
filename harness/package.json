@@ -10,6 +10,7 @@
     "import-cookies": "node lib/import-cookies.js",
     "test": "playwright test",
     "update": "playwright test --update-snapshots",
+    "screenshots": "node fixtures/screenshots.mjs",
     "report": "playwright show-report"
   },
   "devDependencies": {
