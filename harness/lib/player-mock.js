@@ -21,10 +21,13 @@ export const PLAYER_STATES = Object.keys(MEDIA);
 // Navigate to the player page and hide the ad/upsell/toast chrome YT surfaces on /watch.
 export async function gotoPlayer(page, base) {
   await page.goto(base + '/watch?v=dQw4w9WgXcQ', { waitUntil: 'commit' });
+  // No .catch here: if /watch stops seeding playback (fixture / YT DOM change) the title
+  // never populates — throw so the caller's skip/note path surfaces the broken fixture
+  // instead of baselining an unseeded page.
   await page.waitForFunction(() => {
     const t = document.querySelector('ytmusic-player-bar .content-info-wrapper .title');
     return t && t.textContent.trim().length > 0;
-  }, { timeout: 15000 }).catch(() => {});
+  }, { timeout: 15000 });
   await page.locator('ytmusic-player-page').first().waitFor({ state: 'visible', timeout: 8000 });
   await page.addStyleTag({
     content: `ytmusic-mealbar-promo-renderer, ytmusic-you-there-renderer, tp-yt-paper-toast,
@@ -62,13 +65,15 @@ export async function injectPlayerMedia(page, state) {
     media.appendChild(host);
     // Wait for the injected images to actually load + decode before returning, so the
     // screenshot can't capture a blank/partial stage under load (the fixed timeout below is
-    // just a paint settle, not the load guarantee).
-    await Promise.all([...host.querySelectorAll('img')].map((img) => {
-      const loaded = (img.complete && img.naturalWidth > 0)
-        ? Promise.resolve()
-        : new Promise((res) => { img.onload = res; img.onerror = res; });
-      return loaded.then(() => (img.decode ? img.decode().catch(() => {}) : null));
-    }));
+    // just a paint settle, not the load guarantee). REJECT on load/decode failure — a broken
+    // fixture image must surface, not silently baseline a blank stage. Handlers are attached
+    // before the complete-check to avoid a load-before-attach race.
+    await Promise.all([...host.querySelectorAll('img')].map((img) => new Promise((resolve, reject) => {
+      const ok = () => (img.decode ? img.decode().then(resolve, reject) : resolve());
+      img.onload = ok;
+      img.onerror = () => reject(new Error('injectPlayerMedia: mock image failed to load'));
+      if (img.complete && img.naturalWidth > 0) ok();
+    })));
   }, MEDIA[state]);
   await page.waitForTimeout(300);
 }
