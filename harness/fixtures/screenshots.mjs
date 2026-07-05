@@ -194,6 +194,49 @@ try {
     } catch (e) { notes.push('README images not refreshed — ' + e.message.split('\n')[0]); }
   }
 
+  // Visualizer marketing shot (screenshots/visualizer.png): render the app's vendored
+  // Butterchurn + a preset headlessly. Headless WebKit has no AudioWorklet (the app's native
+  // PCM path), so drive Butterchurn directly with a synthetic noise source — same engine and
+  // preset pack the app ships, so the visual is what users see fullscreen. The bloom is
+  // non-deterministic (fine for a marketing image); the preset is one that reads well.
+  {
+    const VIZ = new URL('../../youtube-music-player/Resources/visualizer/', import.meta.url);
+    const vf = (n) => fileURLToPath(new URL(n, VIZ));
+    try {
+      const vctx = await b.newContext({ viewport: { width: 1312, height: 912 }, deviceScaleFactor: 2 });
+      const vp = await vctx.newPage();
+      await vp.goto('data:text/html,<html><body style="margin:0;background:%23000"></body></html>');
+      await vp.addScriptTag({ path: vf('butterchurn.min.js') });
+      await vp.addScriptTag({ path: vf('butterchurnPresets.min.js') });
+      await vp.evaluate(async () => {
+        const canvas = document.createElement('canvas');
+        canvas.style.cssText = 'display:block;width:100vw;height:100vh;';
+        canvas.width = 2624; canvas.height = 1824;
+        document.body.appendChild(canvas);
+        const bc = window.butterchurn.default || window.butterchurn;
+        const bp = window.butterchurnPresets.default || window.butterchurnPresets;
+        const actx = new (window.AudioContext || window.webkitAudioContext)();
+        try { await actx.resume(); } catch {}
+        const buf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let j = 0; j < d.length; j++) d[j] = (Math.random() * 2 - 1) * 0.28;
+        const srcN = actx.createBufferSource(); srcN.buffer = buf; srcN.loop = true;
+        const gain = actx.createGain(); gain.gain.value = 0.5; srcN.connect(gain);
+        const viz = bc.createVisualizer(actx, canvas, { width: 2624, height: 1824, pixelRatio: 1 });
+        viz.connectAudio(gain); srcN.start();
+        const presets = bp.getPresets();
+        const name = presets['Flexi - infused with the spiral'] ? 'Flexi - infused with the spiral' : Object.keys(presets)[0];
+        viz.loadPreset(presets[name], 0);
+        window.__viz = viz;
+        let n = 0; (function loop() { if (n++ > 100000) return; window.__viz.render(); requestAnimationFrame(loop); })();
+      });
+      await vp.waitForTimeout(3500);
+      await vp.screenshot({ path: fileURLToPath(new URL('../../screenshots/visualizer.png', import.meta.url)) });
+      record(new URL('../../screenshots/visualizer.png', import.meta.url));
+      await vctx.close();
+    } catch (e) { notes.push('visualizer.png not captured — ' + e.message.split('\n')[0]); }
+  }
+
   // Content / PII check: on home the page text should carry the fake identity, never a real name.
   await goHome(p);
   const text = await p.evaluate(() => document.body.innerText);

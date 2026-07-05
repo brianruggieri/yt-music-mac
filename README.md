@@ -9,6 +9,7 @@ A lightweight native macOS wrapper for YouTube Music with system integration.
 ## Features
 
 - **Native macOS app** — No Electron, just a lean WebKit wrapper
+- **Light theme** — YouTube Music ships dark-only; this adds a full light theme derived at runtime from YT's own design tokens (so it self-heals across UI changes), with a crossfading dark/light toggle
 - **Media key support** — Control playback with your keyboard's play/pause, next, and previous keys
 - **Now Playing integration** — See track info in Control Center with album artwork
 - **Discord Rich Presence** — Show what you're listening to on Discord
@@ -26,6 +27,10 @@ The built-in light theme, across the app:
 | Explore | Library |
 |:-------:|:-------:|
 | ![Explore](screenshots/explore.png) | ![Library](screenshots/library.png) |
+
+Audio-reactive visualizer (Butterchurn / MilkDrop), a third option on the Song/Video toggle:
+
+![Visualizer](screenshots/visualizer.png)
 
 ## Installation
 
