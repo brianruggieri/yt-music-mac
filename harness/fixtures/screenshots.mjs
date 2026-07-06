@@ -16,14 +16,16 @@ fs.mkdirSync(OUT, { recursive: true });
 const notes = [];   // shots skipped / issues
 const shots = [];   // { file, bytes }
 
-// Settle: engine has flipped the surface to light, then a short beat for layout.
-async function settle(p) {
+// Settle: engine has committed the surface to `mode`, then a short beat for layout.
+// (Dark is YT's native theme — the engine stays inert and just stamps data-ytm-mode=dark.)
+async function settle(p, mode = 'light') {
   try {
     await p.waitForFunction(
-      () => document.documentElement.getAttribute('data-ytm-mode') === 'light',
+      (m) => document.documentElement.getAttribute('data-ytm-mode') === m,
+      mode,
       { timeout: 8000 },
     );
-  } catch { notes.push('engine did not report data-ytm-mode=light within 8s (continuing)'); }
+  } catch { notes.push(`engine did not report data-ytm-mode=${mode} within 8s (continuing)`); }
   await p.waitForTimeout(700);
   // Suppress the engine's :focus-visible ring. The shots that open a menu (account, track ⋮)
   // do it programmatically, which leaves a keyboard-focus ring a mouse user never sees — it
@@ -160,49 +162,52 @@ try {
     } catch { notes.push('08: track action menu did not open — skipped'); }
   }
 
-  // Committed README images (repo-root screenshots/): crisp 2x light-theme captures the README
-  // embeds. Generator-emitted (not hand-captured) so `npm run screenshots` keeps them in sync
-  // with the theme, and fixture identity (Alex Rivera) so there's no real data. These REPLACE
-  // the inherited upstream captures, which were dark-theme AND showed a real account's library
-  // (the Control Center / Discord shots were also that account's — OS-level UI this hermetic
-  // harness can't reproduce; recapture manually if you want to showcase those features).
+  // Committed README/marketing images (repo-root screenshots/): crisp 2x captures the README
+  // embeds, generator-emitted (not hand-captured) so `npm run screenshots` keeps them in sync
+  // with fixture identity (Alex Rivera — no real data). Emitted in BOTH themes as
+  // `<name>-light.png` / `<name>-dark.png` so the README can show the app in light AND dark
+  // (dark is YT's native theme; light is this app's engine). Set covers: home hero, explore,
+  // library, and the three now-playing states (Song / Video / Visualizer) with the real 3-way
+  // toggle. `visualizer.png` (below) is theme-neutral (fullscreen viz on black) so it's single.
   {
     const ROOT = new URL('../../screenshots/', import.meta.url);
-    try {
-      const hctx = await b.newContext({
-        storageState: process.env.YTM_AUTH || undefined,
-        colorScheme: 'light',
-        viewport: { width: 1312, height: 912 },
-        deviceScaleFactor: 2,
-      });
-      await installFixture(hctx);
-      await hctx.addInitScript({ content: ENGINE });
-      const hp = await hctx.newPage();
-      for (const [name, path] of [
-        ['youtube-app', '/'],       // README hero (home)
-        ['explore', '/explore'],
-        ['library', '/library'],
-      ]) {
-        try {
-          await hp.goto(BASE + path, { waitUntil: 'commit' });
-          await hp.waitForTimeout(6500);
-          await settle(hp);
-          await hp.screenshot({ path: fileURLToPath(new URL(`${name}.png`, ROOT)) });
-          record(new URL(`${name}.png`, ROOT));
-        } catch (e) { notes.push(`README ${name}.png not captured — ${e.message.split('\n')[0]}`); }
-      }
-      // Now-playing states (album art / video / visualizer) — inject mock media into the real
-      // player page (see lib/player-mock.js). Headline images of the Song/Video/Visualizer modes.
+    for (const mode of ['light', 'dark']) {
       try {
-        await gotoPlayer(hp, BASE);
-        for (const state of PLAYER_STATES) {
-          await injectPlayerMedia(hp, state);
-          await hp.screenshot({ path: fileURLToPath(new URL(`${state}.png`, ROOT)) });
-          record(new URL(`${state}.png`, ROOT));
+        const hctx = await b.newContext({
+          storageState: process.env.YTM_AUTH || undefined,
+          colorScheme: mode,
+          viewport: { width: 1312, height: 912 },
+          deviceScaleFactor: 2,
+        });
+        await installFixture(hctx);
+        await hctx.addInitScript({ content: ENGINE });
+        const hp = await hctx.newPage();
+        for (const [name, path] of [
+          ['youtube-app', '/'],       // README hero (home)
+          ['explore', '/explore'],
+          ['library', '/library'],
+        ]) {
+          try {
+            await hp.goto(BASE + path, { waitUntil: 'commit' });
+            await hp.waitForTimeout(6500);
+            await settle(hp, mode);
+            await hp.screenshot({ path: fileURLToPath(new URL(`${name}-${mode}.png`, ROOT)) });
+            record(new URL(`${name}-${mode}.png`, ROOT));
+          } catch (e) { notes.push(`README ${name}-${mode}.png not captured — ${e.message.split('\n')[0]}`); }
         }
-      } catch (e) { notes.push('player-state shots not captured — ' + e.message.split('\n')[0]); }
-      await hctx.close();
-    } catch (e) { notes.push('README images not refreshed — ' + e.message.split('\n')[0]); }
+        // Now-playing states (album art / video / visualizer) — inject mock media into the real
+        // player page (see lib/player-mock.js), which also shows the real 3-way toggle.
+        try {
+          await gotoPlayer(hp, BASE);
+          for (const state of PLAYER_STATES) {
+            await injectPlayerMedia(hp, state);
+            await hp.screenshot({ path: fileURLToPath(new URL(`${state}-${mode}.png`, ROOT)) });
+            record(new URL(`${state}-${mode}.png`, ROOT));
+          }
+        } catch (e) { notes.push(`player-state ${mode} shots not captured — ${e.message.split('\n')[0]}`); }
+        await hctx.close();
+      } catch (e) { notes.push(`README ${mode} images not refreshed — ${e.message.split('\n')[0]}`); }
+    }
   }
 
   // Visualizer marketing shot (screenshots/visualizer.png): render the app's vendored
