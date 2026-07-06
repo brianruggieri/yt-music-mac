@@ -338,6 +338,16 @@ enum LightThemeEngine {
             // subtle fill + inset hairline ring + rounded corners, matching the nav/tonal buttons.
             ['ytmusic-card-shelf-renderer',
                 'background-color: rgba(0,0,0,0.035); border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10)'],
+            // …but that card fill has padding:0, so a card-shelf whose header text sits at the
+            // card's edge (the self-channel "Personal mix" auto-mix card: a "PRIVATE" badge +
+            // bold heading in the top-left, no hero thumbnail to inset it) gets jammed against
+            // the rounded corner of the box we just drew. Dark draws no such box, so the tight
+            // padding never shows there. The SEARCH top-result card-shelf is fine — its hero
+            // thumbnail already insets the header — so scope the padding to card-shelves on a
+            // BROWSE page (ytmusic-browse-response), which excludes search (ytmusic-search-page)
+            // and is the only place this header-style card-shelf appears.
+            ['ytmusic-browse-response ytmusic-card-shelf-renderer',
+                'padding: 16px 20px'],
             // Unselected category chips: defined outlined pills so they read as
             // buttons (a subtle fill + visible hairline border over YT's rounded
             // shape, with the inverted dark label). The selected chip keeps YT's
