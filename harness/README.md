@@ -67,6 +67,20 @@ First run creates baselines (no diff to compare against yet). Commit the baselin
 `snapshots/` so future runs catch regressions — including any future YT redesign that
 breaks our theme.
 
+## Local gate (pre-push)
+
+The regression gate runs on your machine, not per-PR in GitHub Actions. Enable it once:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Then every `git push` that touches `LightThemeEngine.swift`, `YouTubeMusicWebView.swift`,
+or `harness/**` runs `npm test` first and blocks the push on failure (skip a single push with
+`git push --no-verify`). The GitHub workflow (`light-theme-gate.yml`) is kept only as a
+post-merge backstop on `main` + a manual `workflow_dispatch`. The live canary
+(`light-theme-canary.yml`) still runs weekly against real YouTube.
+
 ## What it gates
 
 - **Text contrast (1.4.3)** failures **fail the build** in light mode.

@@ -15,6 +15,9 @@ const browseMap = {
   FEmusic_home: 'browse-home', FEmusic_explore: 'browse-explore',
   FEmusic_moods_and_genres: 'browse-moods', FEmusic_library_landing: 'browse-library',
   FEmusic_non_music_audio: 'browse-podcasts',
+  // Self-channel "Personal mix" auto-mix card (a thumbnail-less musicCardShelfRenderer).
+  // Exact match, so it wins over the generic `UC` artist-detail prefix below.
+  UCselfMix000000000000000: 'browse-self-mix',
 };
 // Detail pages: browseId is per-entity, so map by PREFIX (any album/playlist/artist detail
 // request gets the corresponding fake detail fixture).

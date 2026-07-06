@@ -11,6 +11,7 @@
     "test": "playwright test",
     "update": "playwright test --update-snapshots",
     "screenshots": "node fixtures/screenshots.mjs",
+    "viz-headline": "node fixtures/viz-headline.mjs",
     "report": "playwright show-report"
   },
   "devDependencies": {

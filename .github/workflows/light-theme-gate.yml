@@ -8,13 +8,12 @@
 # users see, and (2) the committed screenshot baselines are platform-tagged `*-darwin.png`.
 name: light-theme gate
 
+# The regression gate runs LOCALLY (pre-push hook, `.githooks/pre-push`) so day-to-day pushes
+# don't spin up a macOS Actions run each time. Enable it once per clone with:
+#     git config core.hooksPath .githooks
+# This workflow is kept only as a post-merge backstop on `main` (catches anything that landed
+# without the hook) plus a manual escape hatch — NOT per-PR.
 on:
-  pull_request:
-    paths:
-      - 'youtube-music-player/LightThemeEngine.swift'
-      - 'youtube-music-player/YouTubeMusicWebView.swift'
-      - 'harness/**'
-      - '.github/workflows/light-theme-gate.yml'
   push:
     branches: [main]
     paths:
