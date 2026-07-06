@@ -85,6 +85,12 @@ export async function gotoPlayer(page, base) {
 // Inject the mock media for `state` into the player's media stage (append INTO the media element
 // so it's transform-proof; no toggle click, which would load a real video ad).
 export async function injectPlayerMedia(page, state) {
+  // Live canary (YTM_LIVE): the REAL player is already up and pixel snapshots are skipped, so
+  // there's nothing to mock — and injecting a fake stage over the real, actively-playing page
+  // can hang this page.evaluate long enough to blow the 90s test timeout (which lands as a hard
+  // FAIL, not the graceful skip the opener intends). Leave the real player alone; the contrast +
+  // state audits still run against it, which is the coverage the live canary actually wants.
+  if (process.env.YTM_LIVE) return;
   await page.evaluate(async (m) => {
     document.getElementById('mock-stage')?.remove();
     const media = document.querySelector('ytmusic-player');
@@ -113,12 +119,18 @@ export async function injectPlayerMedia(page, state) {
     // just a paint settle, not the load guarantee). REJECT on load/decode failure — a broken
     // fixture image must surface, not silently baseline a blank stage. Handlers are attached
     // before the complete-check to avoid a load-before-attach race.
-    await Promise.all([...host.querySelectorAll('img')].map((img) => new Promise((resolve, reject) => {
+    const loaded = Promise.all([...host.querySelectorAll('img')].map((img) => new Promise((resolve, reject) => {
       const ok = () => (img.decode ? img.decode().then(resolve, reject) : resolve());
       img.onload = ok;
       img.onerror = () => reject(new Error('injectPlayerMedia: mock image failed to load'));
       if (img.complete && img.naturalWidth > 0) ok();
     })));
+    // Bound the wait: a data: URI that never fires load/decode must surface as an error fast, not
+    // stall to the per-test timeout (which fails hard instead of letting the opener skip).
+    await Promise.race([
+      loaded,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('injectPlayerMedia: media decode timed out')), 8000)),
+    ]);
   }, MEDIA[state]);
 
   // Reflect the state in the toggle: highlight the matching segment (Song/Video/Visualizer).
