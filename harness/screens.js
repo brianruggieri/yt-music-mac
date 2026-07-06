@@ -19,6 +19,7 @@ export const SCREENS = [
   { name: 'album-detail', path: '/browse/MPREb_DYSzDJvUSDu' },
   { name: 'playlist-detail', path: '/playlist?list=PLL-QUKxvck0fMtxQ2aXuU_872TdKnEcLm' },
   { name: 'artist-detail', path: '/channel/UCRr1xG_2WIDs18a6cIiCxeA' },
+  { name: 'self-mix', path: '/channel/UCselfMix000000000000000' },   // self-channel "Personal mix" auto-mix card
   { name: 'podcasts', path: '/podcasts' },
   { name: 'search-empty', path: '/search?q=zzqxwvkjhgp0987xyz' },   // "No results" empty state
   // NOTE (un-gated): empty-LIBRARY state can't be fabricated (this account has content, no
