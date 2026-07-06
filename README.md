@@ -1,6 +1,6 @@
 # YouTube Music for macOS
 
-A lightweight native macOS wrapper for YouTube Music with system integration.
+A native macOS app that gives **YouTube Music a proper light theme** — plus an audio-reactive visualizer, media keys, Now Playing, and Discord Rich Presence. No Electron; just a lean WebKit wrapper, on Apple Silicon and Intel.
 
 <p align="center">
   <img src="screenshots/viz-headline.gif" alt="YouTube Music for macOS — real-time Butterchurn visualizer built into the now-playing page" width="100%">
@@ -100,6 +100,23 @@ Importing playlists requires your own Spotify app credentials:
 
 - macOS 14.0 (Sonoma) or later
 - Xcode 16+ (for building)
+
+## FAQ
+
+**Is there a light mode / light theme for YouTube Music?**
+Yes. YouTube Music ships dark-only; this app adds a full light theme with a crossfading dark/light toggle, derived at runtime from YouTube's own design tokens so it stays correct across UI changes.
+
+**Does it use Electron?**
+No — it's a native macOS app built on WebKit (WKWebView), far lighter than an Electron wrapper.
+
+**Does it run on Apple Silicon?**
+Yes, native on both Apple Silicon and Intel Macs (macOS 14 Sonoma or later).
+
+**What is the visualizer?**
+A third "Visualizer" mode alongside YouTube Music's Song/Video toggle that renders an audio-reactive Butterchurn (MilkDrop) visualization, driven by a native Core Audio tap of the app's own audio.
+
+**Can it import my Spotify playlists?**
+Yes — connect a Spotify account and the app matches and imports your playlists and liked songs into YouTube Music.
 
 ## Acknowledgements
 
