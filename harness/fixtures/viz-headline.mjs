@@ -136,12 +136,16 @@ try {
   const scale = `scale=${WIDTH}:-1:flags=lanczos`;
   const scaleEven = `scale=${WIDTH}:-2:flags=lanczos`;
 
-  // GIF: shared palette from frame-diff (best on a mostly-static page) -> paletteuse -> gifsicle -O3.
+  // GIF: shared palette from frame-diff (best on a mostly-static page) -> paletteuse -> gifsicle.
+  // Use the FULL 256-color palette and a gentle gifsicle lossy: the visualizer is gold-dominant,
+  // and dropping to 160 colors + --lossy=80 culled the less-frequent saturated tones (the reds in
+  // the swirls + the pink/purple album thumbnails washed out to gold). 256 colors + --lossy=30
+  // keeps them and only costs ~0.7 MB.
   execFileSync('ffmpeg', ['-y', '-framerate', inGlob.framerate, '-i', path.join(frameDir, 'f-%04d.png'),
-    '-vf', `${scale},palettegen=stats_mode=diff:max_colors=200`, palette], { stdio: 'ignore' });
+    '-vf', `${scale},palettegen=stats_mode=diff:max_colors=256`, palette], { stdio: 'ignore' });
   execFileSync('ffmpeg', ['-y', '-framerate', inGlob.framerate, '-i', path.join(frameDir, 'f-%04d.png'), '-i', palette,
     '-lavfi', `${scale} [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`, rawGif], { stdio: 'ignore' });
-  execFileSync('gifsicle', ['-O3', '--lossy=80', '--colors', '160', rawGif, '-o', out('viz-headline.gif')], { stdio: 'ignore' });
+  execFileSync('gifsicle', ['-O3', '--lossy=30', rawGif, '-o', out('viz-headline.gif')], { stdio: 'ignore' });
 
   // Animated WebP (landing page; clean loop). img2webp has no scale flag (and this ffmpeg has no
   // libwebp encoder), so pre-scale the frames to WIDTH with ffmpeg first, else the webp embeds the
