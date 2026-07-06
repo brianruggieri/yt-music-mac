@@ -2,6 +2,10 @@
 
 A lightweight native macOS wrapper for YouTube Music with system integration.
 
+<p align="center">
+  <img src="screenshots/viz-headline.gif" alt="YouTube Music for macOS — real-time Butterchurn visualizer built into the now-playing page" width="100%">
+</p>
+
 ![macOS](https://img.shields.io/badge/macOS-14.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.0-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
