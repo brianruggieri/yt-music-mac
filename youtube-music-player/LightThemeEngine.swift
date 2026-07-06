@@ -437,6 +437,20 @@ enum LightThemeEngine {
             // per-row variance can't show. Scoped to the dialog's subtitle, so titles stay black.
             ['ytmusic-add-to-playlist-renderer yt-formatted-string.subtitle, ytmusic-playlist-add-to-option-renderer yt-formatted-string.subtitle',
                 'color: rgb(82,82,82)'],
+            // Search pill: two coupled fixes.
+            //  (1) Corner artifact — YT's raised-search elevation shadow lives on the OUTER
+            //      `.search-container` (border-radius 2px), while the visible fill is the child
+            //      `.search-box` (8px). The shadow traced a squarer box and poked past the
+            //      rounded corners on the light page (invisible in dark). Round the container to
+            //      match so the shadow follows the pill.
+            //  (2) The fill is a translucent dark token (~rgba(0,0,0,.15)); on the light page it's
+            //      a fine grey pill, but the immersive artist/album header lets its hero photo sit
+            //      BEHIND the transparent nav bar, so a translucent pill vanishes into a dark hero
+            //      and the search text goes unreadable (the real light theme uses a SOLID grey
+            //      pill for exactly this reason). Give it an opaque light fill so it reads on any
+            //      backdrop — matches YT's own light-theme search box.
+            ['ytmusic-search-box .search-container', 'border-radius: 8px'],
+            ['ytmusic-search-box .search-box', 'background-color: rgb(233,233,233)'],
         ];
 
         // Brand red, used on purpose in a FEW active/hover places so it keeps meaning
@@ -464,6 +478,15 @@ enum LightThemeEngine {
             // links so it threads red through navigation without repainting every anchor).
             ['ytmusic-responsive-list-item-renderer a.yt-simple-endpoint:hover, ytmusic-shelf-renderer a.yt-simple-endpoint:hover, ytmusic-carousel-shelf-renderer a.yt-simple-endpoint:hover',
                 'color: #cc0029'],
+            // Artist Subscribe button — YT renders it red-accented (red text + red outline), a
+            // deliberate brand splash. In the light immersive header YT's own light foreground
+            // repaints it near-black, dropping the red. Re-assert it: Red Ink text (AA-safe on
+            // the light surface) + a red hairline outline that follows the pill radius, mirroring
+            // dark mode. Scoped to the subscribe renderer so nothing else reddens.
+            ['ytmusic-subscribe-button-renderer yt-formatted-string, ytmusic-subscribe-button-renderer .ytSpecButtonShapeNextButtonTextContent, ytmusic-subscribe-button-renderer span',
+                'color: #cc0029'],
+            ['ytmusic-subscribe-button-renderer button, ytmusic-subscribe-button-renderer yt-button-shape',
+                'box-shadow: inset 0 0 0 1px #cc0029'],
         ];
 
         // Keyboard focus rings — WCAG 2.4.7 (Focus Visible). YT's focus relies on
@@ -616,8 +639,19 @@ enum LightThemeEngine {
                         // while the overlay is active) and fighting the visualizer's own .milkviz-sel.
                         // Drop only the av-toggle PARTS so unrelated selectors grouped in the same
                         // rule still get their inversion emitted.
+                        // OWNERSHIP BOUNDARY: the search pill's fill is owned by one ENHANCE rule
+                        // (opaque light grey, so it reads on the light page AND over the immersive
+                        // artist/album hero the transparent nav bar lets through). YT's own fill is
+                        // translucent (rgba(255,255,255,.15)); the scanner would invert it to a
+                        // translucent BLACK and re-emit it scoped+!important at a specificity the
+                        // ENHANCE rule can't beat — pinning the pill dark-on-dark over the hero.
+                        // Drop only the pill-FILL parts (the `.search-box` class) so the single
+                        // ENHANCE owner wins; the input/placeholder text-darkening rules target
+                        // `input`/`#placeholder` (no `.search-box` class) and MUST survive, else the
+                        // query text stays white-on-light. Hence `\.search-box` (dotted class), not
+                        // the bare `search-box` substring which also hits `input.ytmusic-search-box`.
                         const kept = splitSelectorParts(rule.selectorText)
-                            .filter(function (p) { return !/av-toggle|song-button|video-button/.test(p); });
+                            .filter(function (p) { return !/av-toggle|song-button|video-button|\.search-box/.test(p); });
                         if (!kept.length) continue;
                         const k = scope(kept.join(','));
                         selFixes[k] = (selFixes[k] || []).concat(decls);

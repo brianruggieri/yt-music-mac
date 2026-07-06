@@ -286,6 +286,7 @@ export function transform(root, fake) {
       rename(firstRun(r.title), p);
       setText(r.title, p);
       if (r.shortBylineText) setText(r.shortBylineText, fake.profile.name);
+      setThumb(r, `${ASSET}/playlist/${slug(p)}.png`);   // each row shows its playlist cover
     }
     // Share panel: the copy-link URL carries a per-share `si=` tracking token tied to the
     // account — strip it (keep the plain watch URL; videoIds stay, same policy as elsewhere).
