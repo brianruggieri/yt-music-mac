@@ -20,19 +20,29 @@ A lightweight native macOS wrapper for YouTube Music with system integration.
 
 ## Screenshots
 
-The built-in light theme, across the app:
+Native dark theme and a built-in light theme, across the app.
 
-![Home](screenshots/youtube-app.png)
+**Home**
 
-| Explore | Library |
-|:-------:|:-------:|
-| ![Explore](screenshots/explore.png) | ![Library](screenshots/library.png) |
+| Light | Dark |
+|:-----:|:----:|
+| ![Home (light)](screenshots/youtube-app-light.png) | ![Home (dark)](screenshots/youtube-app-dark.png) |
 
-**Now playing** — album art, music video, or an audio-reactive visualizer:
+| Explore (light) | Explore (dark) |
+|:---------------:|:--------------:|
+| ![Explore (light)](screenshots/explore-light.png) | ![Explore (dark)](screenshots/explore-dark.png) |
 
-| Album art | Video | Visualizer |
-|:---------:|:-----:|:----------:|
-| ![Album art](screenshots/player-song.png) | ![Video](screenshots/player-video.png) | ![Visualizer](screenshots/player-visualizer.png) |
+| Library (light) | Library (dark) |
+|:---------------:|:--------------:|
+| ![Library (light)](screenshots/library-light.png) | ![Library (dark)](screenshots/library-dark.png) |
+
+**Now playing** — album art, music video, or an audio-reactive visualizer, each with the Song / Video / Visualizer toggle:
+
+| | Light | Dark |
+|:-:|:-----:|:----:|
+| Album art | ![Album art (light)](screenshots/player-song-light.png) | ![Album art (dark)](screenshots/player-song-dark.png) |
+| Video | ![Video (light)](screenshots/player-video-light.png) | ![Video (dark)](screenshots/player-video-dark.png) |
+| Visualizer | ![Visualizer (light)](screenshots/player-visualizer-light.png) | ![Visualizer (dark)](screenshots/player-visualizer-dark.png) |
 
 The Butterchurn (MilkDrop) visualizer, full-screen:
 
