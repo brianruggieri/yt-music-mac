@@ -112,22 +112,31 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         // the rest of light mode. (The old data-ytm-theme luma-guess observer could leave
         // this unset → a near-white thumb invisible on the light page.) The light thumb is
         // a neutral medium grey at macOS-overlay weight so it actually reads on #f3f3f3.
+        //
+        // macOS-native overlay feel: narrow gutter (10px, ~7px visible thumb once inset),
+        // fully transparent track, and a hover-only brightening so the thumb reads as
+        // "dim at rest, lit on interaction" like AppKit's overlay scrollbars.
+        // ponytail: true idle-timeout fade (thumb disappears entirely after N seconds of
+        // no scroll/hover) needs a JS scroll listener + class toggle — WebKit's
+        // ::-webkit-scrollbar pseudo-elements always reserve their gutter and can't do a
+        // real overlay-over-content via CSS alone. This is the CSS-only approximation;
+        // add the JS auto-hide only if QA finds the always-present thumb too distracting.
         let css = """
             html {
                 --ytm-sb-thumb: rgba(255, 255, 255, 0.15);
-                --ytm-sb-thumb-hover: rgba(255, 255, 255, 0.25);
+                --ytm-sb-thumb-hover: rgba(255, 255, 255, 0.35);
             }
             html[data-ytm-mode="light"] {
                 --ytm-sb-thumb: rgba(0, 0, 0, 0.32);
-                --ytm-sb-thumb-hover: rgba(0, 0, 0, 0.45);
+                --ytm-sb-thumb-hover: rgba(0, 0, 0, 0.5);
             }
             *, *::before, *::after {
                 scrollbar-width: thin !important;
                 scrollbar-color: var(--ytm-sb-thumb) transparent !important;
             }
             ::-webkit-scrollbar {
-                width: 14px !important;
-                height: 14px !important;
+                width: 10px !important;
+                height: 10px !important;
             }
             ::-webkit-scrollbar-track {
                 background: transparent !important;
@@ -137,6 +146,7 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 border-radius: 100px !important;
                 border-right: 3px solid transparent !important;
                 background-clip: padding-box !important;
+                transition: background-color 150ms ease !important;
             }
             ::-webkit-scrollbar-thumb:hover {
                 background: var(--ytm-sb-thumb-hover) !important;
