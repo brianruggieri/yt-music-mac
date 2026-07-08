@@ -92,6 +92,13 @@ struct YouTubeMusicWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        // Pin the persistent (on-disk) data store explicitly. It's WebKit's default when
+        // unset, but making it explicit is load-bearing: this store is what keeps the
+        // YouTube sign-in cookies AND YT Music's service worker / Cache Storage across
+        // launches. Never switch this to .nonPersistent() — that would silently sign the
+        // user out and disable the offline cache. (WKWebView caching is governed by this
+        // data store, NOT by URLCache, which has no effect on a WKWebView.)
+        config.websiteDataStore = .default()
         config.allowsAirPlayForMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
 
@@ -177,6 +184,36 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         let cssScript = WKUserScript(source: cssJs, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         config.userContentController.addUserScript(cssScript)
 
+        // Ask for eviction-resistant ("persistent") storage so macOS doesn't purge YT
+        // Music's service worker / Cache Storage under disk pressure. Idempotent and cheap;
+        // safe to run every load. Supported in WKWebView since macOS 14 / Safari 17.
+        let persistJs = "navigator.storage && navigator.storage.persist && navigator.storage.persist();"
+        config.userContentController.addUserScript(
+            WKUserScript(source: persistJs, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+
+        // Warm TCP+TLS to the artwork/asset CDNs before playback needs them, via page-level
+        // resource hints WebKit honors. The googlevideo (media) hosts are per-session and
+        // can't be preconnected ahead of time, so this covers the stable image/font CDNs.
+        // crossorigin must MATCH how each resource is actually fetched or the warmed socket
+        // won't be reused: thumbnails load credentialed (plain <img> → no crossorigin);
+        // fonts load as CORS (anonymous).
+        let preconnectJs = """
+            (function() {
+                function hint(rel, href, cors) {
+                    var l = document.createElement('link');
+                    l.rel = rel; l.href = href;
+                    if (cors) l.crossOrigin = 'anonymous';
+                    (document.head || document.documentElement).appendChild(l);
+                }
+                ['https://lh3.googleusercontent.com', 'https://i.ytimg.com', 'https://yt3.ggpht.com']
+                    .forEach(function(h) { hint('preconnect', h, false); hint('dns-prefetch', h, false); });
+                hint('preconnect', 'https://fonts.gstatic.com', true);
+                hint('dns-prefetch', 'https://fonts.gstatic.com', false);
+            })();
+        """
+        config.userContentController.addUserScript(
+            WKUserScript(source: preconnectJs, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+
         // Track info observer script
         let trackObserverJs = #"""
             (function() {
@@ -204,6 +241,26 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                                  .replace(/=s\d+(-[^/]*)?$/, '=s544');
                     }
                     return src;
+                }
+
+                // Feed WebKit's own MediaSession->NowPlaying bridge the <video> clock, so
+                // macOS Control Center / the notch show a live, scrubbable progress bar.
+                // This populates navigator.mediaSession.setPositionState (which YT Music
+                // doesn't reliably set itself) instead of standing up a competing native
+                // MPNowPlayingInfoCenter publisher — so there's no double-owner conflict.
+                function publishPosition() {
+                    const ms = navigator.mediaSession;
+                    const v = document.querySelector('video');
+                    if (!ms || !ms.setPositionState || !v) return;
+                    const dur = v.duration;
+                    if (!isFinite(dur) || dur <= 0) return;
+                    try {
+                        ms.setPositionState({
+                            duration: dur,
+                            position: Math.min(Math.max(v.currentTime, 0), dur),
+                            playbackRate: v.playbackRate || 1
+                        });
+                    } catch (e) { /* invalid state mid-transition — ignore */ }
                 }
 
                 function sendTrackInfo() {
@@ -253,13 +310,25 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                     if (!v || v.__ytmHooked) return;
                     v.__ytmHooked = true;
                     ['loadedmetadata', 'play', 'pause', 'playing']
-                        .forEach(e => v.addEventListener(e, sendTrackInfo));
+                        .forEach(e => v.addEventListener(e, () => { sendTrackInfo(); publishPosition(); }));
                 }
 
                 // Poll as a safety net: catches metadata that lands after the video
                 // events (e.g. artist filled in late) and re-hooks if YT swaps the
                 // <video> element. sendTrackInfo dedupes, so the extra calls are cheap.
-                setInterval(function() { hookVideo(); sendTrackInfo(); }, 500);
+                // Register a seek handler once so the OS scrubber / seek gestures actually
+                // move playback — WebKit routes Control Center + media-key 'seekto' here.
+                try {
+                    navigator.mediaSession.setActionHandler('seekto', function(d) {
+                        const v = document.querySelector('video');
+                        if (!v) return;
+                        if (d.fastSeek && 'fastSeek' in v) v.fastSeek(d.seekTime);
+                        else v.currentTime = d.seekTime;
+                        publishPosition();
+                    });
+                } catch (e) { /* seekto unsupported — Now Playing still shows a static bar */ }
+
+                setInterval(function() { hookVideo(); sendTrackInfo(); publishPosition(); }, 500);
                 hookVideo();
             })();
         """#
@@ -373,7 +442,13 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         // "Edit thumbnail" playlist-cover upload). Without it WKWebView silently drops
         // the open-panel request and the button does nothing.
         webView.uiDelegate = context.coordinator
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        // Report the real Safari/WebKit marketing version (26.0), not a frozen 17.0. The
+        // WKWebView already runs the current WebKit engine, so advertising an old Safari
+        // only makes YouTube Music ship a legacy/polyfilled JS bundle (and risks an
+        // "unsupported browser" nag). The OS + AppleWebKit tokens are Apple-frozen and
+        // correct as-is; only Version/Safari track the release. Bump this when the app's
+        // minimum-supported Safari/WebKit moves forward.
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
         webView.setValue(false, forKey: "drawsBackground")
         // Debug-only: lets Safari's Develop menu attach to the WKWebView for DOM inspection.
         // Never enabled in Release so shipped builds aren't remotely inspectable.
