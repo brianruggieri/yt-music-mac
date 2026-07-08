@@ -1,0 +1,186 @@
+# Build → (sign → notarize) → package → publish a GitHub Release, then optionally bump the
+# Homebrew cask. See docs/RELEASING.md for the full picture and the secrets each tier needs.
+#
+# Triggers:
+#   • push of a tag matching v*   → cuts the release for that version
+#   • manual dispatch (a version) → dry-run build + artifacts, no Release published unless a
+#                                   tag is given
+#
+# Two signing tiers, decided purely by which secrets exist (no workflow edits needed):
+#   Tier 0  no secrets            → universal ad-hoc build; users run `xattr -cr` (matches upstream)
+#   Tier 1  MACOS_CERT_* present  → Developer ID signed + Hardened Runtime
+#           + AC_API_* present    → …and Apple-notarized + stapled (Gatekeeper-clean)
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Marketing version to build (e.g. 1.2.0). No Release is published on manual runs.'
+        required: true
+        default: '0.0.0-dev'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # create the GitHub Release + upload assets
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        run: sudo xcode-select -switch /Applications/Xcode.app
+
+      - name: Derive version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "build_number=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "Building version $v (build ${GITHUB_RUN_NUMBER})"
+
+      - name: Materialize Secrets.swift
+        env:
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+        run: bash scripts/release/make-secrets.sh
+
+      # The `secrets` context is NOT available in step-level `if:` conditions, so we can't gate a
+      # step directly on `secrets.MACOS_CERT_P12 != ''` (it would always be false). Instead resolve
+      # the secrets into booleans here — `secrets` IS allowed inside `env:` — and gate later steps
+      # on these outputs.
+      - name: Detect signing capabilities
+        id: caps
+        env:
+          HAVE_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+          HAVE_NOTARY: ${{ secrets.AC_API_KEY_ID != '' }}
+        run: |
+          echo "sign=$HAVE_CERT" >> "$GITHUB_OUTPUT"
+          echo "notarize=$HAVE_NOTARY" >> "$GITHUB_OUTPUT"
+          # tier2 = the build will actually be notarized (needs both a cert and ASC creds).
+          if [ "$HAVE_CERT" = "true" ] && [ "$HAVE_NOTARY" = "true" ]; then t2=true; else t2=false; fi
+          echo "tier2=$t2" >> "$GITHUB_OUTPUT"
+          echo "Tier: sign=$HAVE_CERT notarize=$HAVE_NOTARY tier2=$t2"
+
+      # --- Tier 1: import the Developer ID cert if present -------------------------------------
+      - name: Import Developer ID certificate
+        id: signing
+        if: ${{ steps.caps.outputs.sign == 'true' }}
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}          # base64 of the .p12
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+          team="$(echo "$identity" | grep -oE '\([A-Z0-9]{10}\)' | tr -d '()')"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          # Fail fast: a cert that imports but yields no Developer ID identity would otherwise
+          # leave identity/team empty and silently fall back to ad-hoc, contradicting the tier.
+          if [[ -z "$identity" || -z "$team" ]]; then
+            echo "::error::MACOS_CERT_P12 imported but no 'Developer ID Application' identity was found. Check that the .p12 contains a Developer ID Application cert + key." >&2
+            exit 1
+          fi
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          echo "team=$team" >> "$GITHUB_OUTPUT"
+          echo "keychain=$KEYCHAIN" >> "$GITHUB_OUTPUT"
+          echo "Imported: $identity (team $team)"
+
+      - name: Build universal app
+        id: build
+        env:
+          MARKETING_VERSION: ${{ steps.ver.outputs.version }}
+          BUILD_NUMBER: ${{ steps.ver.outputs.build_number }}
+          SIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+          DEVELOPMENT_TEAM: ${{ steps.signing.outputs.team }}
+          KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+        run: bash scripts/release/build-app.sh
+
+      # Tier 2 = signed AND notarization creds. Only notarize a Developer-ID-signed build:
+      # notarytool rejects ad-hoc apps, so running this on the unsigned tier would just fail.
+      - name: Notarize (Developer ID + ASC credentials)
+        if: ${{ steps.caps.outputs.sign == 'true' && steps.caps.outputs.notarize == 'true' }}
+        env:
+          APP_PATH: ${{ steps.build.outputs.app_path }}
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+        run: bash scripts/release/notarize.sh
+
+      - name: Package (zip + dmg + checksums)
+        id: pkg
+        env:
+          APP_PATH: ${{ steps.build.outputs.app_path }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: bash scripts/release/package.sh
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-music-${{ steps.ver.outputs.version }}
+          path: dist/
+          retention-days: 30
+
+      # Only a real tag PUSH publishes. A manual dispatch selected against a tag ref would also make
+      # `github.ref_type == 'tag'` true, so require the push event too — manual runs stay dry-run.
+      - name: Publish GitHub Release
+        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: YouTube Music for macOS ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/YouTube-Music-${{ steps.ver.outputs.version }}.zip
+            dist/YouTube-Music-${{ steps.ver.outputs.version }}.dmg
+            dist/SHA256SUMS.txt
+          body: |
+            Universal (Apple Silicon + Intel) build of YouTube Music for macOS.
+
+            **Signing:** ${{ steps.caps.outputs.sign == 'true' && 'Developer ID signed' || 'ad-hoc (unsigned)' }}${{ steps.caps.outputs.tier2 == 'true' && ' + Apple notarized' || '' }}.
+            ${{ steps.caps.outputs.tier2 == 'false' && 'On first launch, clear the quarantine bit: `xattr -cr "/Applications/YouTube Music.app"`' || '' }}
+
+            SHA256 of the download is in `SHA256SUMS.txt`.
+
+  # Bumps the cask in a Homebrew tap you control. Skipped unless HOMEBREW_TAP_TOKEN is set and
+  # the release actually published. See docs/RELEASING.md → "Homebrew cask".
+  homebrew:
+    needs: release
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && vars.HOMEBREW_TAP_REPO != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update cask in tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}   # e.g. brianruggieri/homebrew-youtube-music-macos
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          echo "Configure this step once you have a tap repo — see docs/RELEASING.md."
+          echo "Would update $TAP_REPO cask to $VERSION."
+    # NOTE: left as a documented stub on purpose — wiring it to a real tap is a one-time setup
+    # step that needs a repo + token you own, not something to hardcode here.
