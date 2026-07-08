@@ -21,8 +21,10 @@ Pushing the `v*` tag triggers `.github/workflows/release.yml`, which builds a un
 packages a `.zip` + `.dmg` + `SHA256SUMS.txt`, and publishes a GitHub Release with generated
 notes. No secrets required for a first release — it just ships an ad-hoc build (see tiers below).
 
-You can also run the workflow manually (**Actions → release → Run workflow**) to produce build
-artifacts without publishing a Release.
+You can also run the workflow manually (**Actions → release → Run workflow**): enter a version and
+leave **publish** off for a dry-run (build + downloadable artifacts, no Release). Tick **publish**
+to cut the release from the Actions UI — the workflow creates the `v<version>` tag itself using the
+runner token, which is the path to use in environments where direct `git push`-ing a tag is blocked.
 
 ---
 

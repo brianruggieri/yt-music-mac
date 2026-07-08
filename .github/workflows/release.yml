@@ -2,9 +2,10 @@
 # Homebrew cask. See docs/RELEASING.md for the full picture and the secrets each tier needs.
 #
 # Triggers:
-#   • push of a tag matching v*   → cuts the release for that version
-#   • manual dispatch (a version) → dry-run build + artifacts, no Release published unless a
-#                                   tag is given
+#   • push of a tag matching v*        → cuts the release for that version
+#   • manual dispatch, publish=false   → dry-run: build + artifacts only, no Release (default)
+#   • manual dispatch, publish=true    → cuts the release for `version`, creating tag v<version>
+#     server-side via the runner token (use this where tag pushes are restricted)
 #
 # Two signing tiers, decided purely by which secrets exist (no workflow edits needed):
 #   Tier 0  no secrets            → universal ad-hoc build; users run `xattr -cr` (matches upstream)
@@ -18,9 +19,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Marketing version to build (e.g. 1.2.0). No Release is published on manual runs.'
+        description: 'Marketing version to build (e.g. 1.2.0).'
         required: true
         default: '0.0.0-dev'
+      publish:
+        description: 'Publish a GitHub Release + create tag v<version>. Leave off for a dry-run build.'
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -35,6 +40,8 @@ jobs:
     timeout-minutes: 60
     outputs:
       version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+      publish: ${{ steps.ver.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,15 +50,26 @@ jobs:
 
       - name: Derive version
         id: ver
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          DISPATCH_PUBLISH: ${{ github.event.inputs.publish }}
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             v="${GITHUB_REF_NAME#v}"
+            tag="${GITHUB_REF_NAME}"
+            publish=true                       # a tag push always cuts the release
           else
-            v="${{ github.event.inputs.version }}"
+            v="${DISPATCH_VERSION}"
+            tag="v${v}"
+            publish="${DISPATCH_PUBLISH}"      # 'true' only when the maintainer opted in
           fi
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "build_number=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-          echo "Building version $v (build ${GITHUB_RUN_NUMBER})"
+          {
+            echo "version=$v"
+            echo "tag=$tag"
+            echo "publish=$publish"
+            echo "build_number=${GITHUB_RUN_NUMBER}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building version $v (tag $tag, publish=$publish, build ${GITHUB_RUN_NUMBER})"
 
       - name: Materialize Secrets.swift
         env:
@@ -146,14 +164,16 @@ jobs:
           path: dist/
           retention-days: 30
 
-      # Only a real tag PUSH publishes. A manual dispatch selected against a tag ref would also make
-      # `github.ref_type == 'tag'` true, so require the push event too — manual runs stay dry-run.
+      # Publishes on a tag push, or on a manual dispatch with publish=true. The action creates the
+      # tag (steps.ver.outputs.tag) server-side via the runner token — the path used when direct
+      # tag pushes are restricted. A plain dispatch (publish=false) skips this and stays dry-run.
       - name: Publish GitHub Release
-        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+        if: ${{ steps.ver.outputs.publish == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: YouTube Music for macOS ${{ github.ref_name }}
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: YouTube Music for macOS ${{ steps.ver.outputs.tag }}
           generate_release_notes: true
           files: |
             dist/YouTube-Music-${{ steps.ver.outputs.version }}.zip
@@ -171,7 +191,7 @@ jobs:
   # the release actually published. See docs/RELEASING.md → "Homebrew cask".
   homebrew:
     needs: release
-    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && vars.HOMEBREW_TAP_REPO != '' }}
+    if: ${{ needs.release.outputs.publish == 'true' && vars.HOMEBREW_TAP_REPO != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Update cask in tap
