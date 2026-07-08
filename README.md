@@ -79,6 +79,13 @@ xattr -cr /Applications/YouTube\ Music.app
 
 `run.sh` does a clean build each time, so it always picks up newly added source files.
 
+### Releasing
+
+Releases are built and published automatically by GitHub Actions when a `v*` tag is pushed
+(universal Apple Silicon + Intel, optionally Developer ID–signed and Apple-notarized). See
+[`docs/RELEASING.md`](docs/RELEASING.md) for the pipeline, signing tiers, required secrets, and
+the Homebrew cask setup.
+
 ## Discord Rich Presence Setup
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)

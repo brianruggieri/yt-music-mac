@@ -1,0 +1,38 @@
+# Compile smoke test: does the app still build? Kept deliberately lean — the heavy light-theme
+# regression suite runs locally via the pre-push hook (see .github/workflows/light-theme-gate.yml),
+# so this only guards against "the Swift/project stopped compiling" on code that touches it.
+#
+# Ad-hoc build, no signing, no packaging — just `xcodebuild build`. Manual-dispatch always;
+# auto only when app sources or the project file change on a PR / main push.
+name: build
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'youtube-music-player/**'
+      - 'youtube-music-player.xcodeproj/**'
+      - 'scripts/release/**'
+      - '.github/workflows/build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'youtube-music-player/**'
+      - 'youtube-music-player.xcodeproj/**'
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select latest Xcode
+        run: sudo xcode-select -switch /Applications/Xcode.app
+      - name: Materialize Secrets.swift (placeholders)
+        run: bash scripts/release/make-secrets.sh
+      - name: Build universal app (ad-hoc)
+        run: bash scripts/release/build-app.sh
