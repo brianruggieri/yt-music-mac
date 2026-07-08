@@ -87,6 +87,44 @@ class YouTubeMusicViewModel {
     }
 }
 
+// WKWebView runs the WebKit that ships with the *host* macOS — not "always the latest".
+// On macOS 14 (our min target) the engine is Safari 17-era; macOS 15 is Safari 18-era.
+// Advertising a Safari version newer than the real engine (e.g. Version/26 on Sonoma)
+// makes YouTube Music ship a JS bundle the engine can't run. So derive the marketing
+// version from the runtime OS major and report the *floor* Safari for that release: the
+// real engine is always >= this, so YTM serves a bundle it can run while still avoiding
+// the legacy/"unsupported browser" path an ancient UA would trigger.
+enum SafariUA {
+    static func marketingVersion(forMacOSMajor major: Int) -> String {
+        switch major {
+        case ...14: return "17.0"          // Sonoma (min supported): Safari 17-era WebKit
+        case 15:    return "18.0"          // Sequoia: Safari 18-era
+        default:    return "\(major).0"    // Tahoe (26)+: Safari version tracks the macOS major
+        }
+    }
+
+    static var current: String {
+        marketingVersion(forMacOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
+    }
+
+    // OS + AppleWebKit tokens are Apple-frozen and correct as-is; only Version/Safari track the release.
+    static var userAgent: String {
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(current) Safari/605.1.15"
+    }
+
+    #if DEBUG
+    static func selfCheck() {
+        assert(marketingVersion(forMacOSMajor: 13) == "17.0", "selfCheck: <14 must floor to 17.0")
+        assert(marketingVersion(forMacOSMajor: 14) == "17.0", "selfCheck: Sonoma → 17.0")
+        assert(marketingVersion(forMacOSMajor: 15) == "18.0", "selfCheck: Sequoia → 18.0")
+        assert(marketingVersion(forMacOSMajor: 26) == "26.0", "selfCheck: Tahoe → 26.0")
+        assert(marketingVersion(forMacOSMajor: 27) == "27.0", "selfCheck: future majors track the OS")
+        assert(userAgent.contains("Version/\(current) Safari/"), "selfCheck: UA must embed current version")
+        print("[SafariUA] selfCheck PASSED (current=\(current))")
+    }
+    #endif
+}
+
 struct YouTubeMusicWebView: NSViewRepresentable {
     var viewModel: YouTubeMusicViewModel
 
@@ -442,13 +480,10 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         // "Edit thumbnail" playlist-cover upload). Without it WKWebView silently drops
         // the open-panel request and the button does nothing.
         webView.uiDelegate = context.coordinator
-        // Report the real Safari/WebKit marketing version (26.0), not a frozen 17.0. The
-        // WKWebView already runs the current WebKit engine, so advertising an old Safari
-        // only makes YouTube Music ship a legacy/polyfilled JS bundle (and risks an
-        // "unsupported browser" nag). The OS + AppleWebKit tokens are Apple-frozen and
-        // correct as-is; only Version/Safari track the release. Bump this when the app's
-        // minimum-supported Safari/WebKit moves forward.
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+        // Advertise the Safari version that matches the host OS's real WebKit engine
+        // (see SafariUA) — a hard-coded Version/26 would lie to YouTube Music on the
+        // macOS 14/15 systems we still support.
+        webView.customUserAgent = SafariUA.userAgent
         webView.setValue(false, forKey: "drawsBackground")
         // Debug-only: lets Safari's Develop menu attach to the WKWebView for DOM inspection.
         // Never enabled in Release so shipped builds aren't remotely inspectable.
