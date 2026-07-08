@@ -71,7 +71,10 @@ jobs:
         run: |
           echo "sign=$HAVE_CERT" >> "$GITHUB_OUTPUT"
           echo "notarize=$HAVE_NOTARY" >> "$GITHUB_OUTPUT"
-          echo "Tier: sign=$HAVE_CERT notarize=$HAVE_NOTARY"
+          # tier2 = the build will actually be notarized (needs both a cert and ASC creds).
+          if [ "$HAVE_CERT" = "true" ] && [ "$HAVE_NOTARY" = "true" ]; then t2=true; else t2=false; fi
+          echo "tier2=$t2" >> "$GITHUB_OUTPUT"
+          echo "Tier: sign=$HAVE_CERT notarize=$HAVE_NOTARY tier2=$t2"
 
       # --- Tier 1: import the Developer ID cert if present -------------------------------------
       - name: Import Developer ID certificate
@@ -96,10 +99,16 @@ jobs:
           identity="$(security find-identity -v -p codesigning "$KEYCHAIN" \
             | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
           team="$(echo "$identity" | grep -oE '\([A-Z0-9]{10}\)' | tr -d '()')"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          # Fail fast: a cert that imports but yields no Developer ID identity would otherwise
+          # leave identity/team empty and silently fall back to ad-hoc, contradicting the tier.
+          if [[ -z "$identity" || -z "$team" ]]; then
+            echo "::error::MACOS_CERT_P12 imported but no 'Developer ID Application' identity was found. Check that the .p12 contains a Developer ID Application cert + key." >&2
+            exit 1
+          fi
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
           echo "team=$team" >> "$GITHUB_OUTPUT"
           echo "keychain=$KEYCHAIN" >> "$GITHUB_OUTPUT"
-          rm -f "$RUNNER_TEMP/cert.p12"
           echo "Imported: $identity (team $team)"
 
       - name: Build universal app
@@ -112,7 +121,10 @@ jobs:
           KEYCHAIN: ${{ steps.signing.outputs.keychain }}
         run: bash scripts/release/build-app.sh
 
-      - name: Notarize (if credentials present)
+      # Tier 2 = signed AND notarization creds. Only notarize a Developer-ID-signed build:
+      # notarytool rejects ad-hoc apps, so running this on the unsigned tier would just fail.
+      - name: Notarize (Developer ID + ASC credentials)
+        if: ${{ steps.caps.outputs.sign == 'true' && steps.caps.outputs.notarize == 'true' }}
         env:
           APP_PATH: ${{ steps.build.outputs.app_path }}
           AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
@@ -150,8 +162,8 @@ jobs:
           body: |
             Universal (Apple Silicon + Intel) build of YouTube Music for macOS.
 
-            **Signing:** ${{ steps.caps.outputs.sign == 'true' && 'Developer ID signed' || 'ad-hoc (unsigned)' }}${{ steps.caps.outputs.notarize == 'true' && ' + Apple notarized' || '' }}.
-            ${{ steps.caps.outputs.notarize != 'true' && 'On first launch, clear the quarantine bit: `xattr -cr "/Applications/YouTube Music.app"`' || '' }}
+            **Signing:** ${{ steps.caps.outputs.sign == 'true' && 'Developer ID signed' || 'ad-hoc (unsigned)' }}${{ steps.caps.outputs.tier2 == 'true' && ' + Apple notarized' || '' }}.
+            ${{ steps.caps.outputs.tier2 == 'false' && 'On first launch, clear the quarantine bit: `xattr -cr "/Applications/YouTube Music.app"`' || '' }}
 
             SHA256 of the download is in `SHA256SUMS.txt`.
 

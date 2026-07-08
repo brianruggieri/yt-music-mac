@@ -23,10 +23,10 @@ echo "package: zipping app → $zip"
 
 echo "package: building disk image → $dmg"
 stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT   # remove the staging dir even if hdiutil fails
 cp -R "$APP" "$stage/"
 ln -s /Applications "$stage/Applications"
 hdiutil create -volname "YouTube Music" -srcfolder "$stage" -ov -format UDZO "$dmg" >/dev/null
-rm -rf "$stage"
 
 echo "package: checksums → $OUT/SHA256SUMS.txt"
 ( cd "$OUT" && shasum -a 256 ./*.zip ./*.dmg | sed 's#\./##' > SHA256SUMS.txt )
