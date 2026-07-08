@@ -15,6 +15,18 @@
 > **Deployment floor.** App targets macOS 14 (Sonoma); the visualizer's Core Audio tap
 > already gates to macOS 14.4+. macOS-26-only APIs are flagged as future / min-OS-gated.
 
+> **Status update (shipped).** Wins #1–#4 in the table below have landed. The
+> "current state" prose in the sections that follow is the *pre-fix* snapshot and is
+> kept for the reasoning trail — read it as history, not as the code today. Two
+> corrections matter most:
+> - **UA is now runtime-derived, not hard-coded.** `SafariUA` (`YouTubeMusicWebView.swift`)
+>   maps the host macOS major to the floor Safari version (Sonoma→17, Sequoia→18,
+>   Tahoe 26+→tracks the OS). **Do not "fix" this back to a hard-coded `Version/26.0`** —
+>   that would over-claim the engine on the macOS 14/15 systems this app still supports.
+>   The `Version/17.0` and `Version/26.0` mentions below refer to that earlier snapshot.
+> - **The persistent data store is now explicit.** `config.websiteDataStore = .default()`
+>   is set in `makeNSView`; the "no `WKWebsiteDataStore` is set" note below is stale.
+
 ---
 
 ## Executive summary
