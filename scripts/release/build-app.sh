@@ -60,7 +60,9 @@ fi
 rm -rf "$DERIVED"
 xcodebuild "${args[@]}" build
 
-APP="$(/usr/bin/find "$DERIVED/Build/Products/$CONFIG" -maxdepth 1 -name '*.app' -print -quit)"
+# `|| true`: a missing products dir makes find exit non-zero, which under `set -e` would abort
+# here with a raw error before the friendly message below can run.
+APP="$(/usr/bin/find "$DERIVED/Build/Products/$CONFIG" -maxdepth 1 -name '*.app' -print -quit 2>/dev/null || true)"
 if [[ -z "$APP" ]]; then
   echo "build-app: ERROR — no .app produced under $DERIVED/Build/Products/$CONFIG" >&2
   exit 1

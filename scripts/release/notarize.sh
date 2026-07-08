@@ -21,17 +21,21 @@ if [[ -z "${AC_API_KEY_ID:-}" || -z "${AC_API_ISSUER_ID:-}" ]]; then
   exit 0
 fi
 
-keypath="${AC_API_KEY_PATH:-}"
-tmpkey=""
-if [[ -z "$keypath" ]]; then
-  tmpkey="$(mktemp -t ac_api_key.XXXXXX).p8"
-  printf '%s' "${AC_API_KEY_P8:?AC_API_KEY_P8 or AC_API_KEY_PATH required}" > "$tmpkey"
-  keypath="$tmpkey"
-fi
-cleanup() { [[ -n "$tmpkey" ]] && rm -f "$tmpkey"; }
+# One scratch dir holds the temp key + the submission zip; the trap removes it wholesale.
+# (`rm -rf` returns 0, so it won't override a successful exit status — an EXIT trap whose last
+# command fails would make the whole script exit non-zero even after a clean notarization.)
+work="$(mktemp -d)"
+cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
 
-zip="$(mktemp -d)/notarize.zip"
+keypath="${AC_API_KEY_PATH:-}"
+if [[ -z "$keypath" ]]; then
+  keypath="$work/AuthKey.p8"
+  # umask 077 so the private key is written 0600, not world-readable on a shared runner.
+  ( umask 077; printf '%s' "${AC_API_KEY_P8:?AC_API_KEY_P8 or AC_API_KEY_PATH required}" > "$keypath" )
+fi
+
+zip="$work/notarize.zip"
 /usr/bin/ditto -c -k --keepParent "$APP" "$zip"
 
 echo "notarize: submitting to Apple (this can take a few minutes)…"

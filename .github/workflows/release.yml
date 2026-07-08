@@ -59,10 +59,24 @@ jobs:
           SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
         run: bash scripts/release/make-secrets.sh
 
+      # The `secrets` context is NOT available in step-level `if:` conditions, so we can't gate a
+      # step directly on `secrets.MACOS_CERT_P12 != ''` (it would always be false). Instead resolve
+      # the secrets into booleans here — `secrets` IS allowed inside `env:` — and gate later steps
+      # on these outputs.
+      - name: Detect signing capabilities
+        id: caps
+        env:
+          HAVE_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+          HAVE_NOTARY: ${{ secrets.AC_API_KEY_ID != '' }}
+        run: |
+          echo "sign=$HAVE_CERT" >> "$GITHUB_OUTPUT"
+          echo "notarize=$HAVE_NOTARY" >> "$GITHUB_OUTPUT"
+          echo "Tier: sign=$HAVE_CERT notarize=$HAVE_NOTARY"
+
       # --- Tier 1: import the Developer ID cert if present -------------------------------------
       - name: Import Developer ID certificate
         id: signing
-        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        if: ${{ steps.caps.outputs.sign == 'true' }}
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}          # base64 of the .p12
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -120,8 +134,10 @@ jobs:
           path: dist/
           retention-days: 30
 
+      # Only a real tag PUSH publishes. A manual dispatch selected against a tag ref would also make
+      # `github.ref_type == 'tag'` true, so require the push event too — manual runs stay dry-run.
       - name: Publish GitHub Release
-        if: ${{ github.ref_type == 'tag' }}
+        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -134,8 +150,8 @@ jobs:
           body: |
             Universal (Apple Silicon + Intel) build of YouTube Music for macOS.
 
-            **Signing:** ${{ steps.signing.outputs.identity != '' && 'Developer ID signed' || 'ad-hoc (unsigned)' }}${{ secrets.AC_API_KEY_ID != '' && ' + Apple notarized' || '' }}.
-            ${{ (secrets.AC_API_KEY_ID == '') && 'On first launch, clear the quarantine bit: `xattr -cr "/Applications/YouTube Music.app"`' || '' }}
+            **Signing:** ${{ steps.caps.outputs.sign == 'true' && 'Developer ID signed' || 'ad-hoc (unsigned)' }}${{ steps.caps.outputs.notarize == 'true' && ' + Apple notarized' || '' }}.
+            ${{ steps.caps.outputs.notarize != 'true' && 'On first launch, clear the quarantine bit: `xattr -cr "/Applications/YouTube Music.app"`' || '' }}
 
             SHA256 of the download is in `SHA256SUMS.txt`.
 
@@ -143,7 +159,7 @@ jobs:
   # the release actually published. See docs/RELEASING.md → "Homebrew cask".
   homebrew:
     needs: release
-    if: ${{ github.ref_type == 'tag' && vars.HOMEBREW_TAP_REPO != '' }}
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && vars.HOMEBREW_TAP_REPO != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Update cask in tap

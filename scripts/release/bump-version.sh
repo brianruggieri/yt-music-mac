@@ -13,7 +13,12 @@ cd "$(dirname "$0")/../.."
 VERSION="${1:?usage: bump-version.sh <marketing-version> [--tag]}"
 PBX="youtube-music-player.xcodeproj/project.pbxproj"
 
-cur_build="$(grep -m1 -E 'CURRENT_PROJECT_VERSION = ' "$PBX" | grep -oE '[0-9]+' | head -1)"
+# `|| true` so a missing key gives a clear message instead of a bare `set -e` abort mid-pipe.
+cur_build="$(grep -m1 -E 'CURRENT_PROJECT_VERSION = ' "$PBX" | grep -oE '[0-9]+' | head -1 || true)"
+if [[ -z "$cur_build" ]]; then
+  echo "bump-version: ERROR — couldn't find CURRENT_PROJECT_VERSION in $PBX" >&2
+  exit 1
+fi
 next_build=$(( cur_build + 1 ))
 
 /usr/bin/sed -i.bak -E "s/MARKETING_VERSION = [^;]+;/MARKETING_VERSION = ${VERSION};/g" "$PBX"
