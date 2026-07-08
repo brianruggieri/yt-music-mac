@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import WebKit
 
 struct ContentView: View {
     @State private var webViewModel = YouTubeMusicViewModel()
