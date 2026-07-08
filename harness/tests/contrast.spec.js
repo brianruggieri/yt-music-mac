@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { loadEngineScript } from '../lib/engine.js';
 import { auditContrast } from '../lib/audit.js';
 import { BASE, SCREENS, INTERACTIONS } from '../screens.js';
+import { PLAYER_STATES } from '../lib/player-mock.js';
 import { installFixture } from '../fixtures/fixture.mjs';
 
 const ENGINE = loadEngineScript();
@@ -93,6 +94,12 @@ for (const screen of SCREENS) {
 
 for (const ix of INTERACTIONS) {
   test(`modal:${ix.name}`, async ({ page }, info) => {
+    // Player states are built around injected deterministic media (injectPlayerMedia is a
+    // no-op under YTM_LIVE). In live mode they'd audit a real, actively-playing page whose
+    // <video> + visualizer rAF starves the auditContrast page.evaluate → 90s timeout, not a
+    // real contrast signal. Skip live; add back with paused playback + a raised timeout.
+    test.skip(!!process.env.YTM_LIVE && PLAYER_STATES.includes(ix.name),
+      'player states need mocked media; live playback blows the audit timeout');
     const mode = info.project.name;
     await page.goto(BASE + ix.path, { waitUntil: 'commit' });
     await settle(page, mode);
