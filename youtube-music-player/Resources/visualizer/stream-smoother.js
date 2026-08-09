@@ -618,13 +618,15 @@
             if (!b || b.stopped || b.generation !== generation) return;
             if (!b.started) return bridgeStop(b, 'handover-before-start');
             if (b.rampTimer) return;
-            var steps = Math.max(1, Math.round(bridgeTune.rampMs / bridgeTune.stepMs));
-            var i = 0, v0 = b.volume;
+            // Wall-clock ramp, not tick-count: occluded/backgrounded windows throttle
+            // timers to ~1s, and a tick-counted ramp would then lose a 13s race against
+            // the hard timer. Elapsed-time math degrades to "one late tick, then stop".
+            var v0 = b.volume, rampT0 = performance.now();
             b.rampTimer = setInterval(function () {
-                i++;
                 try {
-                    if (i >= steps) return bridgeStop(b, 'handover');
-                    b.el.volume = Math.max(0, v0 * (1 - i / steps));
+                    var f = (performance.now() - rampT0) / bridgeTune.rampMs;
+                    if (f >= 1) return bridgeStop(b, 'handover');
+                    b.el.volume = Math.max(0, v0 * (1 - f));
                 } catch (e) { bridgeStop(b, 'ramp-failed'); }
             }, bridgeTune.stepMs);
         } catch (e) {}

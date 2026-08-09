@@ -495,8 +495,11 @@ struct YouTubeMusicWebView: NSViewRepresentable {
             // all-off control seed must be installed before it. The probe enables the
             // flags mid-run (treatment phase) — bridge checks its flag per swap and
             // loudness lazy-installs on the first enabled swap, so runtime enable works.
+            // Mutate-in-place when the smoother already created its flags object (user
+            // scripts share addition order, and the smoother captures its own reference
+            // — replacing the global would leave the smoother reading stale defaults).
             config.userContentController.addUserScript(WKUserScript(
-                source: "window.__smootherFlags = { bridge: false, loudness: false };",
+                source: "(function(){var f=window.__smootherFlags;if(f){f.bridge=false;f.loudness=false;}else{window.__smootherFlags={bridge:false,loudness:false};}})();",
                 injectionTime: .atDocumentStart, forMainFrameOnly: true))
             config.userContentController.addUserScript(WKUserScript(source: #"""
             (function () {
