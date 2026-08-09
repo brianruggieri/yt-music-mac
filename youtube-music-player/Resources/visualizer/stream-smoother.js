@@ -163,6 +163,13 @@
         try {
             if (ownedMedia.has(this)) { ownedMedia.add(sb); return sb; }
             var list = mediaSourceBuffers.get(this) || [];
+            if (!list.length) {
+                // First buffer on this MediaSource: arm lifecycle cleanup. Without it,
+                // rotated-out MediaSources pin their SourceBuffer entries and byte
+                // counts in the strong `buffers` Map forever (codex diff review #1).
+                var msRef = this;
+                this.addEventListener('sourceclose', function () { try { dropGroup(msRef); } catch (e) {} });
+            }
             list.push(sb);
             mediaSourceBuffers.set(this, list);
             if (typeof mime === 'string' && mime.indexOf('audio/') === 0) {
@@ -269,7 +276,16 @@
     // Capture-phase document listeners reach media elements without bubbling and
     // survive element replacement. Estimate = lastCt + elapsed*rate while advancing.
     var pos = { lastCt: 0, wallTs: 0, rate: 1, advancing: false, el: null };
-    function isMainVideo(t) { return t && t.tagName === 'VIDEO' && !ownedMedia.has(t); }
+    // Player-scoped identity: preview/ad <video>s outside ytmusic-player must not
+    // drive position, swap qualification, or resets (codex diff review #3). When no
+    // ytmusic-player exists (early load, harness stubs), accept any unowned video.
+    function inPlayerScope(t) {
+        try {
+            if (!t.closest || !document.querySelector('ytmusic-player')) return true;
+            return !!t.closest('ytmusic-player');
+        } catch (e) { return true; }
+    }
+    function isMainVideo(t) { return t && t.tagName === 'VIDEO' && !ownedMedia.has(t) && inPlayerScope(t); }
     document.addEventListener('timeupdate', function (e) {
         if (!isMainVideo(e.target)) return;
         pos.lastCt = e.target.currentTime; pos.wallTs = performance.now();
@@ -668,7 +684,7 @@
 
     function mainVideo() {
         try {
-            var v = document.querySelector('video');
+            var v = document.querySelector('ytmusic-player video') || document.querySelector('video');
             return v && !ownedMedia.has(v) ? v : null;
         } catch (e) { return null; }
     }
@@ -708,7 +724,11 @@
                 // Out of range: hand the raw value to the native setter so its error
                 // reproduces exactly, and commit nothing.
                 if (!(n >= 0 && n <= 1)) { nativeVolumeSet.call(this, v); return; }
-                nativeVolumeSet.call(this, n * effectiveGain());
+                // Compensation applies ONLY to the element carrying it (or the main
+                // video when none is assigned yet) — a secondary element must never be
+                // silently attenuated where no reset path would find it (codex #4).
+                var g = (this === comp.el || (!comp.el && this === mainVideo())) ? effectiveGain() : 1;
+                nativeVolumeSet.call(this, n * g);
                 userVolume.set(this, n);      // committed only after the native write returned
             }
         });
@@ -763,20 +783,16 @@
         return null;
     }
 
-    // Select the candidate for this generation. URL-first; when the URL hasn't
-    // committed to the incoming id (SPA timing varies), an UNAMBIGUOUS single
-    // candidate is safe to use — the prefetch-hijack case necessarily creates a
-    // second candidate, and ambiguity always declines.
+    // Select the candidate for this generation — URL-confirmed ONLY. Measured in-app:
+    // the SPA URL commits to the incoming id before `emptied`, so confirmation is
+    // always available on the real page. An unconfirmed sole-candidate fallback was
+    // tried and dropped (codex diff review #2): the one response in a window can be an
+    // ad/prefetch, and a wrong gain that sticks beats a missed compensation.
     function pickCandidate(generation) {
         var pick = currentVideoId();
         if (pick && openSwap && pick !== openSwap.oldId) {
             var c = candidates.get(pick);
             return (c && c.generation === generation) ? { id: pick, c: c } : null;
-        }
-        if (candidates.size === 1) {
-            var id = candidates.keys().next().value;
-            var c1 = candidates.get(id);
-            return (c1.generation === generation) ? { id: id, c: c1 } : null;
         }
         return null;
     }
@@ -857,8 +873,14 @@
                     setComp(1, null, videoEl);
                     emit('loudness', 'revalidate-reset', { generation: generation, expected: expected, actual: actual });
                 } else {
-                    if (videoEl) comp.el = videoEl;   // element may have been replaced since emptied
-                    reapply(videoEl || comp.el);
+                    if (videoEl && comp.el && videoEl !== comp.el) {
+                        var prevCarrier = comp.el;
+                        comp.el = videoEl;            // element replaced since emptied
+                        reapply(prevCarrier);         // restore the abandoned carrier to native
+                    } else if (videoEl) {
+                        comp.el = videoEl;
+                    }
+                    reapply(comp.el);
                 }
             } else {
                 setComp(1, null, videoEl);

@@ -1725,7 +1725,7 @@
         function clearWatch() {
             if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = 0; }
             if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
-            if (onPlaying && vid) { vid.removeEventListener('playing', onPlaying); }
+            if (onPlaying && vid) { vid.removeEventListener('playing', onPlaying, true); }
             onPlaying = null; vid = null;
         }
 
@@ -1815,13 +1815,19 @@
                 player.style.opacity = '0';
             }
             emit('out');
-            vid = v;
-            onPlaying = function () {
+            // Listen at the document (capture) rather than on the outgoing element:
+            // media events don't bubble but do capture, and if YT replaces the <video>
+            // during the swap an element-bound listener would miss the new stream's
+            // `playing` and strand the dissolve until the fallback timer.
+            vid = document;
+            onPlaying = function (ev) {
+                if (!ev.target || ev.target.tagName !== 'VIDEO') return;
+                document.removeEventListener('playing', onPlaying, true);
                 // Small settle so the first decoded frame is actually on screen
                 // before the dissolve reveals it (avoids a one-frame stale flash).
                 settleTimer = setTimeout(finish, 60);
             };
-            v.addEventListener('playing', onPlaying, { once: true });
+            document.addEventListener('playing', onPlaying, true);
             // The swap normally resolves in <500ms; if `playing` never fires
             // (error path, ad break), don't leave the stage invisible.
             fallbackTimer = setTimeout(finish, 1600);
