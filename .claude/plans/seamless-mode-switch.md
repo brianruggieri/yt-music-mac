@@ -91,9 +91,11 @@ Trigger: `ytm-swapfade` `{phase:'out'}`. Each trigger takes a **generation token
 `out` immediately tears down any prior bridge (codex #13).
 
 1. Guards (all abort silently w/ telemetry reason): flags.bridge on; retained audio exists,
-   replayable, for the MediaSource currently attached to the main video (via wrapper 2; if that
-   MediaSource has multiple audio SourceBuffers, use the most-recently-appended whose replay
-   covers the tracked position — codex r2 #9); main video not muted, effective volume > 0, not
+   replayable, for the MediaSource currently attached to the main video (via wrapper 2; with
+   multiple audio SourceBuffers, selection is by most-recent-append only — coverage of raw
+   retained bytes is unknowable before replay, so the codex r2 #9 "covers the position"
+   clause resolves post-replay: no coverage → abort, no sibling fallback; single audio SB is
+   the norm and a wrong-buffer replay fails safe); main video not muted, effective volume > 0, not
    paused, `playbackRate === 1` (non-1× → abort, simpler than mirroring drift — codex r2 #5);
    position tracker reports `advancing === true` (a stalled/waiting element has
    `paused === false` but no audio to continue — decline, codex r4 #6);
@@ -198,8 +200,10 @@ mirroring at all.
 
 - **Probe run** (Debug, `YTM_TOGGLE_PROBE=1`), assertions from captured log:
   - loudness cache entries for both videoIds; `apply`/`skip` with gain ≤ 1; formula inputs logged.
-  - bridge `start` → `end` (no `abort`) both toggle directions; generation token respected on a
-    rapid double-toggle case.
+  - bridge `start` → `end` with end reason a qualified handover — **`hard-timeout` ends fail
+    the gate** (a start→end pair alone can mask a 2s doubling run); generation token respected
+    on a rapid double-toggle case; `latencyMs` and post-handover RMS confirm the bridge and the
+    new stream's seek-back land at the same position (no ~300ms echo).
   - media-event shape unchanged; FADE events still bracket.
   - **Audio-level ground truth** (codex #18, hardened per r2 #11): probe activates the native
     AudioTap feed and logs per-frame RMS around each toggle. **A/B within one session**: first

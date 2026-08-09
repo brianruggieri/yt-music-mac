@@ -491,6 +491,13 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         // can be compared against the plain-Chrome baseline.
         if ProcessInfo.processInfo.environment["YTM_TOGGLE_PROBE"] == "1" {
             config.userContentController.add(context.coordinator, name: "perfProbe")
+            // A/B seed: the smoother reads __smootherFlags at document START, so the
+            // all-off control seed must be installed before it. The probe enables the
+            // flags mid-run (treatment phase) — bridge checks its flag per swap and
+            // loudness lazy-installs on the first enabled swap, so runtime enable works.
+            config.userContentController.addUserScript(WKUserScript(
+                source: "window.__smootherFlags = { bridge: false, loudness: false };",
+                injectionTime: .atDocumentStart, forMainFrameOnly: true))
             config.userContentController.addUserScript(WKUserScript(source: #"""
             (function () {
                 if (window.__probeInstalled) return; window.__probeInstalled = true;
@@ -503,9 +510,48 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 var last = performance.now();
                 (function loop() { var n = performance.now(); if (n - last > 100) L('FRAME_GAP', { gap: +(n - last).toFixed(0) }); last = n; requestAnimationFrame(loop); })();
                 document.addEventListener('ytm-swapfade', function (e) { L('FADE_' + (e.detail && e.detail.phase), {}); });
+                document.addEventListener('ytm-smoother', function (e) { L('SMOOTHER', e.detail); });
+                // RMS trace from the native AudioTap feed (interleaved stereo Float32,
+                // base64, ~60Hz batches). We own __milkFeed: the visualizer UI is never
+                // activated in a probe run, only the native capture (modeOn).
+                var rms = [];
+                window.__milkFeed = function (b64) {
+                    try {
+                        var bin = atob(b64), u8 = new Uint8Array(bin.length);
+                        for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+                        var f = new Float32Array(u8.buffer), s = 0;
+                        for (var j = 0; j < f.length; j++) s += f[j] * f[j];
+                        rms.push({ t: Math.round(performance.now()), v: Math.sqrt(s / f.length) });
+                        if (rms.length > 12000) rms.shift();
+                    } catch (e) {}
+                };
                 function post(m) { try { webkit.messageHandlers.perfProbe.postMessage(m); } catch (e) {} }
                 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
                 function v() { return document.querySelector('video'); }
+                // Longest continuous sub-threshold run inside [t0,t1] (ms). Threshold is
+                // reported raw alongside so the analysis can recalibrate offline.
+                var TH = 0.003;
+                function silentMs(t0, t1) {
+                    var start = null, prev = null, longest = 0;
+                    rms.forEach(function (p) {
+                        if (p.t < t0 || p.t > t1) return;
+                        if (p.v < TH) { if (start === null) start = p.t; prev = p.t; }
+                        else if (start !== null) { longest = Math.max(longest, prev - start); start = null; }
+                    });
+                    if (start !== null) longest = Math.max(longest, prev - start);
+                    return longest;
+                }
+                function btn(c) { return document.querySelector('.av-toggle button.' + c); }
+                async function toggle(cls, label) {
+                    var t0 = performance.now();
+                    L('CLICK ' + label, { ct: +v().currentTime.toFixed(3) });
+                    btn(cls).click();
+                    await sleep(6000);
+                    L('GAP ' + label, { silentMs: silentMs(t0, t0 + 3000), rmsPoints: rms.length });
+                }
+                // Position-matched pairs: same seek target + settle before control and
+                // treatment so musical dynamics don't skew the RMS comparison.
+                async function seekSettle(sec) { try { v().currentTime = sec; } catch (e) {} await sleep(2500); }
                 async function run() {
                     post('probe installed on ' + location.pathname);
                     await sleep(8000);
@@ -515,13 +561,27 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                         await sleep(500);
                     }
                     if (!(v() && v().readyState >= 3 && !v().paused)) { post('FAIL: playback never started; log=' + JSON.stringify(log)); return; }
-                    function btn(c) { return document.querySelector('.av-toggle button.' + c); }
                     if (!btn('song-button') || !btn('video-button')) { post('FAIL: toggle not found'); return; }
+                    try { webkit.messageHandlers.visualizer.postMessage({ action: 'modeOn' }); } catch (e) {}
+                    await sleep(1500);
+                    if (!rms.length) L('RMS_UNAVAILABLE', {});
                     log.length = 0;
-                    L('CLICK song', { ct: +v().currentTime.toFixed(3) }); btn('song-button').click();
+                    L('PHASE control', { flags: JSON.stringify(window.__smootherFlags) });
+                    await seekSettle(60);
+                    await toggle('song-button', 'ctrl-song');
+                    await toggle('video-button', 'ctrl-video');
+                    window.__smootherFlags.bridge = true;
+                    window.__smootherFlags.loudness = true;
+                    L('PHASE treatment', { flags: JSON.stringify(window.__smootherFlags) });
+                    await seekSettle(60);
+                    await toggle('song-button', 'treat-song');
+                    await toggle('video-button', 'treat-video');
+                    L('PHASE rapid', {});
+                    var t0 = performance.now();
+                    btn('song-button').click(); await sleep(150); btn('video-button').click();
                     await sleep(6000);
-                    L('CLICK video', { ct: +v().currentTime.toFixed(3) }); btn('video-button').click();
-                    await sleep(6000);
+                    L('GAP rapid', { silentMs: silentMs(t0, t0 + 3000) });
+                    try { webkit.messageHandlers.visualizer.postMessage({ action: 'modeOff' }); } catch (e) {}
                     post('RESULT ' + JSON.stringify(log));
                 }
                 run();
