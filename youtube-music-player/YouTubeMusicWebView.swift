@@ -474,6 +474,53 @@ struct YouTubeMusicWebView: NSViewRepresentable {
             }
         }
 
+        #if DEBUG
+        // Song<->Video toggle probe (debug builds, YTM_TOGGLE_PROBE=1 launches only).
+        // Self-driving: navigates to a video-backed track, toggles Video->Song->Video,
+        // logs media-element events + rAF frame gaps, and NSLogs the result via the
+        // perfProbe handler. Measures the stream-swap hiccup inside the real app so it
+        // can be compared against the plain-Chrome baseline.
+        if ProcessInfo.processInfo.environment["YTM_TOGGLE_PROBE"] == "1" {
+            config.userContentController.add(context.coordinator, name: "perfProbe")
+            config.userContentController.addUserScript(WKUserScript(source: #"""
+            (function () {
+                if (window.__probeInstalled) return; window.__probeInstalled = true;
+                var log = [];
+                function L(tag, extra) { var e = Object.assign({ t: +performance.now().toFixed(1), tag: tag }, extra || {}); log.push(e); }
+                var EV = ['loadstart','loadedmetadata','canplay','seeking','seeked','waiting','stalled','playing','pause','play','emptied','durationchange'];
+                function wire(v) { if (v.__pw) return; v.__pw = true; EV.forEach(function (ev) { v.addEventListener(ev, function () { L(ev, { ct: +v.currentTime.toFixed(3), rs: v.readyState }); }); }); }
+                document.querySelectorAll('video').forEach(wire);
+                new MutationObserver(function () { document.querySelectorAll('video').forEach(wire); }).observe(document.documentElement, { childList: true, subtree: true });
+                var last = performance.now();
+                (function loop() { var n = performance.now(); if (n - last > 100) L('FRAME_GAP', { gap: +(n - last).toFixed(0) }); last = n; requestAnimationFrame(loop); })();
+                document.addEventListener('ytm-swapfade', function (e) { L('FADE_' + (e.detail && e.detail.phase), {}); });
+                function post(m) { try { webkit.messageHandlers.perfProbe.postMessage(m); } catch (e) {} }
+                function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+                function v() { return document.querySelector('video'); }
+                async function run() {
+                    post('probe installed on ' + location.pathname);
+                    await sleep(8000);
+                    if (!/watch/.test(location.pathname)) { post('navigating to watch page'); location.href = 'https://music.youtube.com/watch?v=i3Jv9fNPjgk'; return; }
+                    for (var i = 0; i < 40 && !(v() && v().readyState >= 3 && !v().paused && v().currentTime > 2); i++) {
+                        if (i === 5 && v() && v().paused) { var b = document.querySelector('ytmusic-player-bar #play-pause-button'); if (b) b.click(); }
+                        await sleep(500);
+                    }
+                    if (!(v() && v().readyState >= 3 && !v().paused)) { post('FAIL: playback never started; log=' + JSON.stringify(log)); return; }
+                    function btn(c) { return document.querySelector('.av-toggle button.' + c); }
+                    if (!btn('song-button') || !btn('video-button')) { post('FAIL: toggle not found'); return; }
+                    log.length = 0;
+                    L('CLICK song', { ct: +v().currentTime.toFixed(3) }); btn('song-button').click();
+                    await sleep(6000);
+                    L('CLICK video', { ct: +v().currentTime.toFixed(3) }); btn('video-button').click();
+                    await sleep(6000);
+                    post('RESULT ' + JSON.stringify(log));
+                }
+                run();
+            })();
+            """#, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        }
+        #endif
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         // uiDelegate supplies the native file picker for <input type=file> (e.g. the
@@ -733,7 +780,14 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 Task { @MainActor in
                     self.viewModel.headerColor = color
                 }
-            } else if message.name == "visualizer",
+            }
+            #if DEBUG
+            if message.name == "perfProbe" {
+                NSLog("PERFPROBE: %@", String(describing: message.body))
+                return
+            }
+            #endif
+            if message.name == "visualizer",
                       let body = message.body as? [String: Any],
                       let action = body["action"] as? String {
                 // Only honor capture commands from a real YT Music page. This handler is
