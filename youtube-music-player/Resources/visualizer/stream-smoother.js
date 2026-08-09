@@ -80,6 +80,24 @@
         return result;
     };
 
+    // YT Music on WebKit issues /youtubei/v1/player via XHR, not fetch (measured:
+    // the fetch hook alone caught zero responses in-app). Same harvest, same
+    // call-original-exactly-once discipline; the load listener is passive.
+    if (typeof XMLHttpRequest !== 'undefined') {
+        var origXhrOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (method, url) {
+            try {
+                if (typeof url === 'string' && url.indexOf('/youtubei/v1/player') !== -1 && !this.__smootherWatched) {
+                    this.__smootherWatched = true;
+                    this.addEventListener('load', function () {
+                        try { harvestPlayerResponse(JSON.parse(this.responseText)); } catch (e) {}
+                    });
+                }
+            } catch (e) {}
+            return origXhrOpen.apply(this, arguments);
+        };
+    }
+
     // Cold-load track arrives embedded, not via fetch.
     function seedInitial() { harvestPlayerResponse(window.ytInitialPlayerResponse); }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', seedInitial);
@@ -195,14 +213,23 @@
 
     var origAbort = SourceBuffer.prototype.abort;
     SourceBuffer.prototype.abort = function () {
+        // Whether an append was in flight must be read BEFORE the native call clears it.
+        var wasUpdating = false;
+        try { wasUpdating = this.updating === true; } catch (e) {}
         var r = origAbort.apply(this, arguments);
-        // Only after native success: abort resets MSE parser state mid-segment, so a
-        // concatenated replay of committed bytes would feed the parser data it
-        // discarded. Conservative: drop pending, mark non-replayable until changeType
-        // or a fresh SourceBuffer. (Seek-adjacent bridging is an accepted limitation.)
+        // abort() resets MSE parser state; bytes of an INTERRUPTED append are partially
+        // consumed, so a concatenated replay across that boundary feeds the parser data
+        // it discarded — invalidate. But YT also calls abort() routinely during normal
+        // stream setup with the parser idle (measured: every toggle) — an idle abort
+        // discards nothing, and invalidating there would disable bridging for every
+        // stream. Residual risk (segment split across appends + idle abort) surfaces as
+        // a decode error in the bridge's OWN element, which fail-silently tears down.
         try {
             var st = bufState(this);
-            if (st) { st.pending = null; st.replayable = false; emit('retention', 'abort-nonreplayable', {}); }
+            if (st) {
+                st.pending = null;
+                if (wasUpdating) { st.replayable = false; emit('retention', 'abort-nonreplayable', {}); }
+            }
         } catch (e) {}
         return r;
     };
