@@ -448,6 +448,15 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 ?? Bundle.main.url(forResource: name, withExtension: "js"))
                 .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
         }
+        // Stream smoother MUST inject at document START (all other scripts are
+        // document-end): its fetch hook has to see the first /youtubei/v1/player call
+        // and its MediaSource/SourceBuffer prototype patches must precede YT's player
+        // boot. See .claude/plans/seamless-mode-switch.md.
+        if let smootherSrc = loadJS("stream-smoother", "visualizer") {
+            config.userContentController.addUserScript(
+                WKUserScript(source: smootherSrc, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+
         // Worklet source for visualizer.js. A worklet must load into the
         // AudioWorklet context (not the page), so we hand its source over as a
         // string and let visualizer.js build a blob: module from it. base64 +
