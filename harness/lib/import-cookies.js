@@ -20,8 +20,51 @@ if (!inPath) {
   process.exit(1);
 }
 
-const raw = JSON.parse(readFileSync(inPath, 'utf8'));
-const arr = Array.isArray(raw) ? raw : raw.cookies || [];
+// Two accepted inputs. A Cookie-Editor JSON export is the better one — it carries real
+// expiry dates, which the CI canary uses to tell a live session from a dead one. But
+// installing an extension isn't always possible (Chrome blocks it in Incognito), so we
+// also take the raw `Cookie:` request header, copied from DevTools → Network → any
+// music.youtube.com request → Request Headers. That header includes the httpOnly auth
+// cookies, which `document.cookie` cannot see — which is why it works at all.
+//
+// The header carries names and values only, so the rest is reconstructed: everything is
+// marked secure (we only ever talk to https) and session-scoped. Session-scoped is the
+// real cost — expiry is unknowable from a header, so a session imported this way always
+// looks live to the canary's staleness check even after Google kills it.
+function parseCookieHeader(text) {
+  return text
+    .split(/;\s*/)
+    .filter(Boolean)
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      if (eq < 1) return null;
+      const name = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
+      // `__Host-` cookies are host-locked by spec: no domain attribute, path must be /.
+      const hostOnly = name.startsWith('__Host-');
+      return {
+        name,
+        value,
+        domain: hostOnly ? 'music.youtube.com' : '.youtube.com',
+        path: '/',
+        session: true,
+        secure: true,
+        httpOnly: false,
+        sameSite: 'no_restriction',
+      };
+    })
+    .filter(Boolean);
+}
+
+const text = readFileSync(inPath, 'utf8').trim();
+let arr;
+try {
+  const raw = JSON.parse(text);
+  arr = Array.isArray(raw) ? raw : raw.cookies || [];
+} catch {
+  arr = parseCookieHeader(text);
+  console.log(`  (input isn't JSON — read it as a raw Cookie header: ${arr.length} pairs)`);
+}
 
 const sameSite = (s) => {
   s = (s || '').toLowerCase();
