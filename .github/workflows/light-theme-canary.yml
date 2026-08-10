@@ -5,6 +5,11 @@
 # state (focus/hover) audits are the signal. A failure here means "YT changed something,
 # investigate" — the fix is usually to re-capture the fixtures and re-baseline the gate.
 #
+# Only the specs that actually load music.youtube.com run here — playwright.config.js drops
+# the engine-local ones when YTM_LIVE is set, so a red canary always means "YT moved" and
+# never "a local unit test raced on a slow runner". (It used to mean either; that ambiguity
+# cost three weeks of a red canary in Jul/Aug 2026.)
+#
 # Flakiness is expected (rotating content, missing modal triggers -> those tests skip, not
 # fail). retries:2 (playwright.config) absorbs transient jitter; a persistent contrast
 # failure is the real alert. A scheduled-run failure notifies the repo admins by default.
@@ -35,14 +40,41 @@ jobs:
       # Optional logged-in session: set the YTM_AUTH_JSON secret to the contents of a
       # Playwright storageState file to unlock Home/Library personalization. Without it the
       # canary still exercises Explore/Search (logged-out) — enough to catch gross redesigns.
-      # NOTE: the session cookie EXPIRES; refresh the secret periodically or use a throwaway
-      # account. (Locally: `npm run import-cookies cookies.json` produces auth.json.)
+      # NOTE: the session cookie EXPIRES; refresh the secret periodically. Use a THROWAWAY
+      # Google account — the report artifact below is public and the account-menu capture in
+      # it shows the display name, email, and avatar. Which account to use, what to seed it
+      # with, and how to refresh it: harness/README.md, "Using a throwaway account for the CI
+      # canary". (Locally: `npm run import-cookies cookies.json` produces auth.json.)
       - name: Write logged-in session (if secret present)
         id: auth
         env:
           SESSION: ${{ secrets.YTM_AUTH_JSON }}
         run: |
-          if [ -n "$SESSION" ]; then printf '%s' "$SESSION" > auth.json; echo "have=1" >> "$GITHUB_OUTPUT"; else echo "have=0" >> "$GITHUB_OUTPUT"; fi
+          # `have` must mean "this session still logs us in", NOT "the secret is non-empty".
+          # An EXPIRED storageState is the expected end state of this secret (see the note
+          # above) and it writes to disk perfectly happily — YT then opens logged out, the
+          # authenticated screens skip, and the run stays green on half the coverage. So
+          # check that a YouTube auth cookie is actually still live. Malformed JSON throws
+          # and lands here too, which is right: don't hand Playwright a storageState that
+          # would crash it.
+          if [ -z "$SESSION" ]; then echo "have=0" >> "$GITHUB_OUTPUT"; exit 0; fi
+          printf '%s' "$SESSION" > auth.json
+          if node -e '
+              const s = require("./auth.json");
+              const AUTH = ["SID", "__Secure-1PSID", "__Secure-3PSID"];   // YT'"'"'s login cookies
+              const now = Date.now() / 1000;
+              const live = (s.cookies || []).some(
+                (c) => AUTH.includes(c.name) && (c.expires === -1 || c.expires > now)
+              );
+              process.exit(live ? 0 : 1);
+            ' 2>/dev/null; then
+            echo "have=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=0" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Warn when the canary is running logged out
+        if: steps.auth.outputs.have != '1'
+        run: echo "::warning title=Canary running logged out::YTM_AUTH_JSON is unset, malformed, or its YouTube login cookie has expired, so the logged-in modal/menu screens will skip. Refresh the secret to restore full canary coverage."
       - name: Run live canary (contrast + state audits vs real YT)
         env:
           YTM_LIVE: '1'

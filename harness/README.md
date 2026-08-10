@@ -54,6 +54,42 @@ the session you already have in your normal browser:
 
 Without any auth, Explore/Search/Moods still render and are audited; the modal tests skip.
 
+### Using a throwaway account for the CI canary
+
+The weekly canary can run logged in via the `YTM_AUTH_JSON` repo secret (paste the whole
+contents of `auth.json`). **Use a throwaway Google account, never your own** — the canary
+uploads its Playwright report as a public artifact, and the account-menu capture in it shows
+the display name, the email address, and the avatar. Real playlists and a real profile photo
+have leaked into this repo's history once already.
+
+So, on the throwaway:
+
+- **Display name** something like `YTM Canary`, not a human name. **Leave the avatar as the
+  default letter tile** — don't upload a photo.
+- **No subscription needed.** Every surface the canary touches (library, playlists, settings,
+  context menus, add-to-playlist, share) is free-tier. Premium only buys background play,
+  downloads, and ad removal. If free-tier ad surfaces ever start throwing contrast noise,
+  that's the one reason to reconsider.
+- **Seed it, or the tests still skip.** The openers need something to open: a couple of
+  playlists (`add-to-playlist`), some library content (`sort-menu`), track rows on Home
+  (`track-context-menu`, `share-panel`), and some listening history (the `self-mix` personal
+  mix card is generated). Keep it boring — it all ends up in the artifact.
+- Sign in to it in a **separate browser profile**, so exporting its cookies doesn't mean
+  signing out of your real account.
+
+Refreshing it is the same import flow above, then update the secret. Expect to redo it
+periodically: Google kills sessions on password change, "sign out of all devices", and
+security events, and the runners hit YouTube from rotating datacenter IPs, which doesn't
+help. The canary now prints a `::warning` on any run where the session isn't live, so a
+dead secret shows up on the run instead of silently halving coverage — that check looks for
+a live YouTube login cookie, not just a non-empty secret, because an *expired* session is
+still a perfectly non-empty string.
+
+Two housekeeping notes on the account itself: keep the password in a manager with a recovery
+address you own (and the backup codes, if you enable 2FA — locking yourself out means
+recreating and re-seeding the whole thing), and sign in manually once or twice a year, since
+Google reclaims accounts after about two years of inactivity.
+
 ## Run
 
 ```bash
