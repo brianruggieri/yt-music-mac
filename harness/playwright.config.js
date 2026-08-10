@@ -8,6 +8,13 @@ export default defineConfig({
   testDir: './tests',
   snapshotDir: './snapshots',
   outputDir: './test-results',
+  // In live mode the run IS the canary, and its one question is "did YT change something?".
+  // Specs that never load music.youtube.com can't answer that — they only make a red canary
+  // ambiguous (a local-engine failure looks identical to a YT redesign in the run list). They
+  // stay fully covered by the deterministic fixture gate, which runs them on every push.
+  testIgnore: process.env.YTM_LIVE
+    ? ['**/theme-transition.spec.js', '**/fs-controls-util.spec.js']
+    : [],
   timeout: 90_000,
   expect: { timeout: 15_000 },
   // Fixtures make content deterministic, so the 0.03 screenshot gate is tight. Occasional

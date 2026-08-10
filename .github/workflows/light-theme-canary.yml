@@ -5,6 +5,11 @@
 # state (focus/hover) audits are the signal. A failure here means "YT changed something,
 # investigate" — the fix is usually to re-capture the fixtures and re-baseline the gate.
 #
+# Only the specs that actually load music.youtube.com run here — playwright.config.js drops
+# the engine-local ones when YTM_LIVE is set, so a red canary always means "YT moved" and
+# never "a local unit test raced on a slow runner". (It used to mean either; that ambiguity
+# cost three weeks of a red canary in Jul/Aug 2026.)
+#
 # Flakiness is expected (rotating content, missing modal triggers -> those tests skip, not
 # fail). retries:2 (playwright.config) absorbs transient jitter; a persistent contrast
 # failure is the real alert. A scheduled-run failure notifies the repo admins by default.
@@ -43,6 +48,11 @@ jobs:
           SESSION: ${{ secrets.YTM_AUTH_JSON }}
         run: |
           if [ -n "$SESSION" ]; then printf '%s' "$SESSION" > auth.json; echo "have=1" >> "$GITHUB_OUTPUT"; else echo "have=0" >> "$GITHUB_OUTPUT"; fi
+      # A stale/absent session degrades silently — the logged-in modal openers just aren't
+      # there, so those tests skip and the run still goes green on half the coverage. Say so.
+      - name: Warn when the canary is running logged out
+        if: steps.auth.outputs.have != '1'
+        run: echo "::warning title=Canary running logged out::YTM_AUTH_JSON is unset or empty, so the logged-in modal/menu screens will skip. Refresh the secret to restore full canary coverage."
       - name: Run live canary (contrast + state audits vs real YT)
         env:
           YTM_LIVE: '1'
