@@ -398,7 +398,7 @@
     // it never plays while the main element is still alive (two-input latch), and it
     // never survives the incoming stream's first audio (ramped handover).
 
-    var bridgeTune = { hardMs: 2000, rampMs: 150, stepMs: 12, maxAppends: 3, posTolerance: 0.1, minRunway: 0.25 };
+    var bridgeTune = { hardMs: 3500, rampMs: 150, stepMs: 12, maxAppends: 3, posTolerance: 0.1, minRunway: 0.25, alignMinMs: 25, alignMaxMs: 3000, alignSlackS: 0.03, alignLeadS: 0.05, alignSeekMaxMs: 800, alignRampMs: 80, alignReseekSkewS: 0.05, alignMaxReseeks: 3 };
     var bridge = null;                          // at most one live bridge, ever
 
     // Most-recently-appended replayable audio retention for a MediaSource. Shared with
@@ -408,7 +408,10 @@
         var best = null;
         list.forEach(function (sb) {
             var st = buffers.get(sb);
-            if (st && st.replayable && st.bytes > 0 && (!best || st.lastAppendTs > best.lastAppendTs)) best = st;
+            // Most BYTES wins, not most recent: a near-empty secondary buffer (measured:
+            // 7 chunks, valid ftyp head, zero playable range) can be the most recently
+            // appended and would replay to nothing.
+            if (st && st.replayable && st.bytes > 10 * 1024 && (!best || st.bytes > best.bytes)) best = st;
         });
         return best;   // {mime, chunks, bytes, ...} or null
     }
@@ -441,9 +444,25 @@
 
     // Telemetry pairs with the 'start' emission: a bridge that made noise ends, one
     // that never did aborts. Reason always travels.
+    // Undo the alignment hold's native silence on the incoming stream. Uses the
+    // loudness layer's reapply when its accessor owns the element (reinstates the
+    // compensated value); plain write otherwise. Idempotent.
+    function bridgeRestoreMain(b) {
+        if (!b || !b.holding) return;
+        b.holding = false;
+        try {
+            var m = mainVideo();
+            if (!m) return;
+            if (volumePatched) reapply(m);
+            else m.volume = b.heldVol;
+        } catch (e) {}
+    }
+
     function bridgeStop(b, reason) {
         if (!b || b.stopped) return;
         b.stopped = true;
+        if (b.holdTimer) { clearInterval(b.holdTimer); b.holdTimer = null; }
+        bridgeRestoreMain(b);
         var started = b.started;
         bridgeTeardown(b);
         emit('bridge', started ? 'end' : 'abort', { generation: b.generation, reason: reason });
@@ -566,6 +585,7 @@
             // NOT teardown signals — only intent that makes the bridge wrong to hear.
             bridgeListen(b, document, 'volumechange', function (e) {
                 if (!isMainVideo(e.target)) return;
+                if (b.holding) return;   // alignment hold zeroes the main element itself
                 if (e.target.muted || !(nativeVolumeOf(e.target) > 0)) bridgeStop(b, 'main-muted');
             }, true);
             bridgeListen(b, document, 'ratechange', function (e) {
@@ -599,7 +619,17 @@
                     if (idx < parts.length) return pump();
                     // Default timestampOffset means the replay keeps the original timeline,
                     // so the tracked position must land inside it or we'd play the wrong audio.
-                    if (!bridgeCovers(sb, b.trackedPos)) return bridgeStop(b, 'position-not-buffered');
+                    if (!bridgeCovers(sb, b.trackedPos)) {
+                        var ranges = [];
+                        try { for (var ri = 0; ri < sb.buffered.length; ri++) ranges.push([+sb.buffered.start(ri).toFixed(2), +sb.buffered.end(ri).toFixed(2)]); } catch (e) {}
+                        var head = '';
+                        try {
+                            var h = st.chunks[0];
+                            for (var hi = 0; hi < 8 && hi < h.length; hi++) head += (h[hi] < 16 ? '0' : '') + h[hi].toString(16);
+                        } catch (e) {}
+                        emit('bridge', 'coverage-miss', { generation: b.generation, trackedPos: +b.trackedPos.toFixed(2), ranges: JSON.stringify(ranges), chunksN: st.chunks.length, head: head });
+                        return bridgeStop(b, 'position-not-buffered');
+                    }
                     b.replayReady = true;
                     bridgeMaybeStart(b);
                 });
@@ -626,25 +656,126 @@
         } catch (e) {}
     }
 
-    // Qualified handover (or the foundation's expired-window sweep, same path): the new
-    // stream is audible, so fade out under it. The overlap IS the crossfade.
+    // Wall-clock crossfade-out, not tick-count: occluded/backgrounded windows throttle
+    // timers to ~1s, and a tick-counted ramp would then lose the race against the hard
+    // timer. Elapsed-time math degrades to "one late tick, then stop".
+    function bridgeBeginRamp(b, ms, reason) {
+        if (b.rampTimer) return;
+        var v0 = 0;
+        try { v0 = b.el.volume; } catch (e) { v0 = b.volume; }
+        var rampT0 = performance.now();
+        b.rampTimer = setInterval(function () {
+            try {
+                var f = (performance.now() - rampT0) / ms;
+                if (f >= 1) return bridgeStop(b, reason);
+                b.el.volume = Math.max(0, v0 * (1 - f));
+            } catch (e) { bridgeStop(b, 'ramp-failed'); }
+        }, bridgeTune.stepMs);
+    }
+
+    // Qualified handover (or the foundation's expired-window sweep, same path). The new
+    // stream seeks back to ~the CLICK position while the bridge has been playing past
+    // it — an immediate crossfade therefore REPLAYS that overlap audibly (measured as
+    // user-reported duplication). Alignment hold: keep the bridge sounding, natively
+    // silence the incoming stream, and let its playhead run until it catches the
+    // bridge's; then restore its volume and fast-crossfade. The content between click
+    // and catch-up plays exactly once (via the bridge); the main element's duplicate
+    // pass is spent silently.
     function bridgeOnHandover(generation) {
         try {
             var b = bridge;
             if (!b || b.stopped || b.generation !== generation) return;
             if (!b.started) return bridgeStop(b, 'handover-before-start');
-            if (b.rampTimer) return;
-            // Wall-clock ramp, not tick-count: occluded/backgrounded windows throttle
-            // timers to ~1s, and a tick-counted ramp would then lose a 13s race against
-            // the hard timer. Elapsed-time math degrades to "one late tick, then stop".
-            var v0 = b.volume, rampT0 = performance.now();
-            b.rampTimer = setInterval(function () {
+            if (b.rampTimer || b.holdTimer) return;
+            var main = mainVideo();
+            var mainCt = main ? main.currentTime : -1;
+            var bridgeCt = 0;
+            try { bridgeCt = b.el.currentTime; } catch (e) {}
+            var aheadMs = Math.round((bridgeCt - mainCt) * 1000);
+            emit('bridge', 'handover-align', { generation: generation, mainCt: +mainCt.toFixed(3), bridgeCt: +bridgeCt.toFixed(3), aheadMs: aheadMs });
+            // Convergence needs a seek: both playheads advance at 1x, so waiting for
+            // the silenced main to "catch" the still-playing bridge chases a moving
+            // target forever (measured: 178ms apart after a 1.2s hold). Instead: keep
+            // the bridge sounding, natively silence the incoming stream, and SEEK it to
+            // the bridge's position + a small lead (covering seek latency); release on
+            // landing. The overlap plays exactly once, via the bridge. alignMaxMs caps
+            // insanity (an early bogus ct on the incoming stream must not trigger a
+            // far-forward seek).
+            if (main && mainCt >= 0 && aheadMs > bridgeTune.alignMinMs && aheadMs < bridgeTune.alignMaxMs) {
+                b.holding = true;
+                b.heldVol = nativeVolumeOf(main);
+                var seekOk = false;
                 try {
-                    var f = (performance.now() - rampT0) / bridgeTune.rampMs;
-                    if (f >= 1) return bridgeStop(b, 'handover');
-                    b.el.volume = Math.max(0, v0 * (1 - f));
-                } catch (e) { bridgeStop(b, 'ramp-failed'); }
-            }, bridgeTune.stepMs);
+                    if (volumePatched && nativeVolumeSet) nativeVolumeSet.call(main, 0);
+                    else main.volume = 0;
+                    var target = b.el.currentTime + bridgeTune.alignLeadS;
+                    main.currentTime = target;
+                    seekOk = true;
+                    emit('bridge', 'align-seek', { generation: generation, target: +target.toFixed(3) });
+                } catch (e) {}
+                if (!seekOk) {
+                    bridgeRestoreMain(b);
+                    bridgeBeginRamp(b, bridgeTune.rampMs, 'handover');
+                    return;
+                }
+                var holdT0 = performance.now();
+                var reseeks = 0;
+                var releaseDone = false;
+                function holdCleanup() {
+                    if (b.holdTimer) { clearInterval(b.holdTimer); b.holdTimer = null; }
+                    document.removeEventListener('seeked', tryRelease, true);
+                    document.removeEventListener('timeupdate', tryRelease, true);
+                }
+                var lastLead = bridgeTune.alignLeadS;
+                function doRelease(m, caught) {
+                    releaseDone = true;
+                    holdCleanup();
+                    var skewMs = m ? Math.round((m.currentTime - b.el.currentTime) * 1000) : null;
+                    bridgeRestoreMain(b);
+                    emit('bridge', 'align-release', { generation: generation, caught: caught, heldMs: Math.round(performance.now() - holdT0), skewMs: skewMs, reseeks: reseeks });
+                    bridgeBeginRamp(b, bridgeTune.alignRampMs, 'handover');
+                }
+                function tryRelease() {
+                    try {
+                        if (releaseDone) return;
+                        if (b.stopped) { releaseDone = true; holdCleanup(); return; }
+                        var m = mainVideo();
+                        var expired = performance.now() - holdT0 > bridgeTune.alignSeekMaxMs;
+                        if (!m) { if (expired) doRelease(null, false); return; }
+                        if (expired) return doRelease(m, false);
+                        if (m.seeking) return;                     // wait for the seek to settle
+                        // Seek latency varies (measured 33-200ms) while the bridge keeps
+                        // advancing, so a fixed lead lands with real skew EITHER way —
+                        // behind (lead too small: releasing would replay = duplication) or
+                        // ahead (lead too big: skips content). Adapt the lead by the
+                        // observed miss and re-seek until inside the slack; bounded budget.
+                        var skew = m.currentTime - b.el.currentTime;
+                        if (Math.abs(skew) <= bridgeTune.alignReseekSkewS) return doRelease(m, true);
+                        if (reseeks < bridgeTune.alignMaxReseeks) {
+                            reseeks++;
+                            lastLead = Math.min(0.5, Math.max(0.05, lastLead - skew + 0.02));
+                            m.currentTime = b.el.currentTime + lastLead;
+                            return;
+                        }
+                        // Budget exhausted: never release audibly while BEHIND the bridge
+                        // (behind = guaranteed duplication); ahead-of-bridge releases with
+                        // a bounded skip, and the expiry cap bounds the behind-wait.
+                        if (skew >= -bridgeTune.alignSlackS) return doRelease(m, true);
+                    } catch (e) {
+                        releaseDone = true;
+                        holdCleanup();
+                        bridgeRestoreMain(b);
+                        bridgeBeginRamp(b, bridgeTune.rampMs, 'handover');
+                    }
+                }
+                // Event-driven release: `seeked`/`timeupdate` deliver even when interval
+                // timers are throttled (occluded window); the interval is the fallback.
+                document.addEventListener('seeked', tryRelease, true);
+                document.addEventListener('timeupdate', tryRelease, true);
+                b.holdTimer = setInterval(tryRelease, 15);
+                return;
+            }
+            bridgeBeginRamp(b, bridgeTune.rampMs, 'handover');
         } catch (e) {}
     }
 

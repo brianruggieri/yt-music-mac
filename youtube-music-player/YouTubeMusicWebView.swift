@@ -518,16 +518,57 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 // base64, ~60Hz batches). We own __milkFeed: the visualizer UI is never
                 // activated in a probe run, only the native capture (modeOn).
                 var rms = [];
+                var pcm = [];      // {t, d: Float32Array} mono 6kHz batches, ~12s retained
+                var pcmSamples = 0;
                 window.__milkFeed = function (b64) {
                     try {
                         var bin = atob(b64), u8 = new Uint8Array(bin.length);
                         for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
                         var f = new Float32Array(u8.buffer), s = 0;
                         for (var j = 0; j < f.length; j++) s += f[j] * f[j];
-                        rms.push({ t: Math.round(performance.now()), v: Math.sqrt(s / f.length) });
+                        var now = performance.now();
+                        rms.push({ t: Math.round(now), v: Math.sqrt(s / f.length) });
                         if (rms.length > 12000) rms.shift();
+                        // Mono 6kHz downmix (stereo interleaved 48k -> stride 8 frames)
+                        var frames = f.length >> 1, n = Math.floor(frames / 8);
+                        var d = new Float32Array(n);
+                        for (var k = 0; k < n; k++) { var idx = k * 16; d[k] = (f[idx] + f[idx + 1]) * 0.5; }
+                        pcm.push({ t: now, d: d }); pcmSamples += n;
+                        while (pcmSamples > 6000 * 12) { pcmSamples -= pcm[0].d.length; pcm.shift(); }
                     } catch (e) {}
                 };
+                // Flatten PCM in [t0,t1] (wall-clock ms) into one array at ~6kHz.
+                function pcmWindow(t0, t1) {
+                    var out = [];
+                    for (var i = 0; i < pcm.length; i++) {
+                        var b = pcm[i], durMs = b.d.length / 6;
+                        if (b.t + durMs < t0 || b.t > t1) continue;
+                        for (var k = 0; k < b.d.length; k++) {
+                            var st = b.t + k / 6;
+                            if (st >= t0 && st <= t1) out.push(b.d[k]);
+                        }
+                    }
+                    return out;
+                }
+                // Does the tail of what played BEFORE the audible transition repeat
+                // after it? Max normalized cross-correlation of A (last 400ms pre) vs
+                // B (900ms post) over lags 0..700ms. Duplication = high corr at a lag.
+                function dupMetric(tRelease) {
+                    var A = pcmWindow(tRelease - 450, tRelease - 50);
+                    var B = pcmWindow(tRelease, tRelease + 900);
+                    if (A.length < 1200 || B.length < 3000) return { corr: -1, lagMs: -1, note: 'insufficient-pcm' };
+                    var aN = 0; for (var i = 0; i < A.length; i++) aN += A[i] * A[i];
+                    if (aN < 1e-6) return { corr: -1, lagMs: -1, note: 'silent-tail' };
+                    var best = 0, bestLag = 0;
+                    for (var L = 0; L + A.length <= B.length; L += 2) {
+                        var dot = 0, bN = 0;
+                        for (var j = 0; j < A.length; j++) { dot += A[j] * B[j + L]; bN += B[j + L] * B[j + L]; }
+                        if (bN < 1e-6) continue;
+                        var r = dot / Math.sqrt(aN * bN);
+                        if (r > best) { best = r; bestLag = L; }
+                    }
+                    return { corr: +best.toFixed(3), lagMs: Math.round(bestLag / 6) };
+                }
                 function post(m) { try { webkit.messageHandlers.perfProbe.postMessage(m); } catch (e) {} }
                 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
                 function v() { return document.querySelector('video'); }
@@ -550,7 +591,17 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                     L('CLICK ' + label, { ct: +v().currentTime.toFixed(3) });
                     btn(cls).click();
                     await sleep(6000);
-                    L('GAP ' + label, { silentMs: silentMs(t0, t0 + 3000), rmsPoints: rms.length });
+                    L('GAP ' + label, { silentMs: silentMs(t0, t0 + 3500), rmsPoints: rms.length });
+                    // The audible transition is align-release when the hold ran, else handover.
+                    var rel = null, hand = null;
+                    for (var i = log.length - 1; i >= 0; i--) {
+                        var e = log[i];
+                        if (e.tag !== 'SMOOTHER' || e.t < t0) continue;
+                        if (!rel && e.module === 'bridge' && e.event === 'align-release') rel = e;
+                        if (!hand && e.module === 'swap' && e.event === 'handover') hand = e;
+                    }
+                    var tRel = rel ? rel.t : (hand ? hand.t : 0);
+                    if (tRel) L('DUP ' + label, dupMetric(tRel));
                 }
                 // Position-matched pairs: same seek target + settle before control and
                 // treatment so musical dynamics don't skew the RMS comparison.
@@ -565,8 +616,13 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                     }
                     if (!(v() && v().readyState >= 3 && !v().paused)) { post('FAIL: playback never started; log=' + JSON.stringify(log)); return; }
                     if (!btn('song-button') || !btn('video-button')) { post('FAIL: toggle not found'); return; }
-                    try { webkit.messageHandlers.visualizer.postMessage({ action: 'modeOn' }); } catch (e) {}
-                    await sleep(1500);
+                    // The native tap occasionally misses its first start (process-tap
+                    // race right after launch) — retry until PCM actually flows.
+                    for (var ta = 0; ta < 6 && !rms.length; ta++) {
+                        try { webkit.messageHandlers.visualizer.postMessage({ action: 'modeOn' }); } catch (e) {}
+                        await sleep(2500);
+                        if (!rms.length) { try { webkit.messageHandlers.visualizer.postMessage({ action: 'modeOff' }); } catch (e) {} await sleep(800); }
+                    }
                     if (!rms.length) L('RMS_UNAVAILABLE', {});
                     log.length = 0;
                     L('PHASE control', { flags: JSON.stringify(window.__smootherFlags) });
@@ -579,6 +635,8 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                     await seekSettle(60);
                     await toggle('song-button', 'treat-song');
                     await toggle('video-button', 'treat-video');
+                    await toggle('song-button', 'treat2-song');
+                    await toggle('video-button', 'treat2-video');
                     L('PHASE rapid', {});
                     var t0 = performance.now();
                     btn('song-button').click(); await sleep(150); btn('video-button').click();
