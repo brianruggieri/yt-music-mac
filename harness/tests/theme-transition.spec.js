@@ -81,6 +81,34 @@ test('theme toggle crossfades via View Transitions', async ({ page }) => {
   expect(durations).toContain('0.4s');
 });
 
+// Regression: toggling again while a crossfade is still running SKIPS the first transition,
+// which rejects its `finished` promise. That late handler used to strip the marker class the
+// second transition had just added, silently dropping it to the UA default 250ms. The [light]
+// project hit this in CI because its dark-seed crossfade could still be in flight.
+test('a toggle during an in-flight crossfade keeps the tuned duration', async ({ page }) => {
+  await page.goto(PAGE, { waitUntil: 'commit' });
+  const { sawClass, durations, classCleared } = await page.evaluate(async () => {
+    window.__ytmSetSystemDark(true);           // start crossfade #1 ...
+    await new Promise((r) => requestAnimationFrame(r));
+    const de = document.documentElement;
+    const durations = [];
+    let sawClass = false;
+    window.__ytmSetSystemDark(false);          // ... and interrupt it with crossfade #2
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      if (de.classList.contains('ytm-theme-vt')) sawClass = true;
+      const d = getComputedStyle(de, '::view-transition-old(root)').animationDuration;
+      if (d) durations.push(d);
+    }
+    await new Promise((r) => setTimeout(r, 600));
+    return { sawClass, durations, classCleared: !de.classList.contains('ytm-theme-vt') };
+  });
+  expect(sawClass).toBe(true);
+  expect(durations).toContain('0.4s');
+  expect(durations).not.toContain('0.25s');    // the UA default = our scoped rule stopped matching
+  expect(classCleared).toBe(true);
+});
+
 test('reduced-motion flips instantly (no crossfade)', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto(PAGE, { waitUntil: 'commit' });

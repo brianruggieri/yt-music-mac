@@ -1013,6 +1013,11 @@ enum LightThemeEngine {
         // no-animate tick can't flip the attribute out from under it (startViewTransition's
         // update callback runs asynchronously — the flip happens a microtask later).
         let pendingMode = null;
+        // Marker-class ownership. Starting a transition while one is still running SKIPS the
+        // old one, which rejects its `finished` promise — and that late handler would strip
+        // the `ytm-theme-vt` class the NEW transition just added, dropping the tuned crossfade
+        // back to the UA default 250ms. Only the newest transition may clear the marker.
+        let vtSeq = 0;
         // The full mode switch: leave-light cleanup + the attribute flip + the inline
         // pins, run SYNCHRONOUSLY here so the View Transition's "new" snapshot is the
         // fully-resolved frame (the pins otherwise land a tick later, which the frozen
@@ -1046,7 +1051,8 @@ enum LightThemeEngine {
                 // `html.ytm-theme-vt::view-transition-*` rule) applies to OUR transition
                 // only — never restyling a view transition some other page code might run.
                 de.classList.add('ytm-theme-vt');
-                const done = () => de.classList.remove('ytm-theme-vt');
+                const mine = ++vtSeq;
+                const done = () => { if (mine === vtSeq) de.classList.remove('ytm-theme-vt'); };
                 const vt = document.startViewTransition(() => switchMode(next));
                 // A skipped transition (rapid re-toggle) rejects ready/finished — its update
                 // callback still runs, so just swallow the rejects and always drop the marker.
