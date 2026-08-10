@@ -40,8 +40,11 @@ jobs:
       # Optional logged-in session: set the YTM_AUTH_JSON secret to the contents of a
       # Playwright storageState file to unlock Home/Library personalization. Without it the
       # canary still exercises Explore/Search (logged-out) — enough to catch gross redesigns.
-      # NOTE: the session cookie EXPIRES; refresh the secret periodically or use a throwaway
-      # account. (Locally: `npm run import-cookies cookies.json` produces auth.json.)
+      # NOTE: the session cookie EXPIRES; refresh the secret periodically. Use a THROWAWAY
+      # Google account — the report artifact below is public and the account-menu capture in
+      # it shows the display name, email, and avatar. Which account to use, what to seed it
+      # with, and how to refresh it: harness/README.md, "Using a throwaway account for the CI
+      # canary". (Locally: `npm run import-cookies cookies.json` produces auth.json.)
       - name: Write logged-in session (if secret present)
         id: auth
         env:
