@@ -108,6 +108,7 @@ struct ContentView: View {
         .disabled(!enabled)
         .keyboardShortcut(shortcut, modifiers: .command)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     private var headerIsDark: Bool {
