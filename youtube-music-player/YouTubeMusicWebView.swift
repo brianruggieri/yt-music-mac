@@ -39,7 +39,32 @@ enum ThemeMode: String, CaseIterable, Identifiable {
 @Observable
 @MainActor
 class YouTubeMusicViewModel {
-    weak var webView: WKWebView?
+    weak var webView: WKWebView? {
+        didSet { observeBackForward() }
+    }
+
+    // Mirror WKWebView's canGoBack/canGoForward into observable state so the header
+    // buttons gray out correctly. KVO (not the navigation delegate) is load-bearing:
+    // YT Music is an SPA, and its pushState route changes update the back-forward
+    // list WITHOUT firing any navigation-delegate callback.
+    var canGoBack = false
+    var canGoForward = false
+    private var backForwardObservations: [NSKeyValueObservation] = []
+
+    private func observeBackForward() {
+        guard let webView else { backForwardObservations = []; return }
+        backForwardObservations = [
+            webView.observe(\.canGoBack, options: [.initial, .new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.canGoBack = wv.canGoBack }
+            },
+            webView.observe(\.canGoForward, options: [.initial, .new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.canGoForward = wv.canGoForward }
+            },
+        ]
+    }
+
+    func goBack() { webView?.goBack() }
+    func goForward() { webView?.goForward() }
 
     // Force the webview's appearance to the chosen mode; the light-theme engine
     // picks up the resulting prefers-color-scheme change on its own. The app-wide
@@ -484,6 +509,8 @@ struct YouTubeMusicWebView: NSViewRepresentable {
         // (see SafariUA) — a hard-coded Version/26 would lie to YouTube Music on the
         // macOS 14/15 systems we still support.
         webView.customUserAgent = SafariUA.userAgent
+        // Native two-finger swipe to go back/forward, same as Safari.
+        webView.allowsBackForwardNavigationGestures = true
         webView.setValue(false, forKey: "drawsBackground")
         // Debug-only: lets Safari's Develop menu attach to the WKWebView for DOM inspection.
         // Never enabled in Release so shipped builds aren't remotely inspectable.

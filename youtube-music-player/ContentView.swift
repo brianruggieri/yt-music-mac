@@ -25,9 +25,18 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Window header for dragging
+            // Window header for dragging, with back/forward overlaid past the traffic lights.
             WindowHeader(color: webViewModel.headerColor)
                 .frame(height: 32)
+                .overlay(alignment: .leading) {
+                    HStack(spacing: 4) {
+                        navButton("chevron.left", enabled: webViewModel.canGoBack,
+                                  shortcut: "[", help: "Back") { webViewModel.goBack() }
+                        navButton("chevron.right", enabled: webViewModel.canGoForward,
+                                  shortcut: "]", help: "Forward") { webViewModel.goForward() }
+                    }
+                    .padding(.leading, 80)   // clear the traffic lights
+                }
 
             YouTubeMusicWebView(viewModel: webViewModel)
         }
@@ -81,6 +90,30 @@ struct ContentView: View {
         } message: {
             Text(diagnosticResult ?? "")
         }
+    }
+
+    // Header nav button: icon color follows the header's luma (the header mirrors YT
+    // Music's nav-bar color, which can be light or dark independent of system appearance).
+    private func navButton(_ symbol: String, enabled: Bool, shortcut: KeyEquivalent,
+                           help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(headerIsDark ? Color.white : Color.black)
+        .opacity(enabled ? 0.85 : 0.3)
+        .disabled(!enabled)
+        .keyboardShortcut(shortcut, modifiers: .command)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private var headerIsDark: Bool {
+        let c = webViewModel.headerColor.usingColorSpace(.sRGB) ?? .black
+        return (0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent) < 0.5
     }
 
     private func setupDiscordPresence() {
