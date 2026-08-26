@@ -2,6 +2,8 @@
 
 A native macOS app that gives **YouTube Music a proper light theme** — plus an audio-reactive visualizer, media keys, Now Playing, and Discord Rich Presence. No Electron; just a lean WebKit wrapper, on Apple Silicon and Intel.
 
+> Unofficial app — not affiliated with or endorsed by Google or YouTube.
+
 <p align="center">
   <img src="screenshots/viz-headline.gif" alt="YouTube Music for macOS — real-time Butterchurn visualizer built into the now-playing page" width="100%">
 </p>
@@ -53,16 +55,6 @@ The Butterchurn (MilkDrop) visualizer, full-screen:
 ![Visualizer](screenshots/visualizer.png)
 
 ## Installation
-
-### Homebrew (Recommended)
-
-```bash
-brew tap 0xjemm/youtube-music-macos
-brew install --cask youtube-music-macos
-xattr -cr /Applications/YouTube\ Music.app
-```
-
-### Manual
 
 1. Download the latest release from [Releases](../../releases)
 2. Extract and drag to Applications
@@ -126,6 +118,10 @@ A third "Visualizer" mode alongside YouTube Music's Song/Video toggle that rende
 Yes — connect a Spotify account and the app matches and imports your playlists and liked songs into YouTube Music.
 
 ## Acknowledgements
+
+This project originated as a fork of
+[0xjemm/youtube-music-macos](https://github.com/0xjemm/youtube-music-macos) and is now
+independently developed.
 
 The visualizer is powered by [Butterchurn](https://github.com/jberg/butterchurn) and
 [butterchurn-presets](https://github.com/jberg/butterchurn-presets) by Jordan Berg
