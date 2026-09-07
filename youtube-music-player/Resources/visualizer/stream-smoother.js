@@ -449,13 +449,20 @@
     // compensated value); plain write otherwise. Idempotent.
     function bridgeRestoreMain(b) {
         if (!b || !b.holding) return;
-        b.holding = false;
+        b.holding = false;               // clears the reapply() hold-guard before we write
         try {
+            // Restore the element we actually silenced, not whatever is current — YT can
+            // replace the media element mid-hold, and our zero is still sitting on the old
+            // one. Reapplying a detached element is harmless; skipping it is not.
+            var held = b.heldEl || mainVideo();
+            if (held) {
+                if (volumePatched) reapply(held);
+                else held.volume = b.heldVol;
+            }
             var m = mainVideo();
-            if (!m) return;
-            if (volumePatched) reapply(m);
-            else m.volume = b.heldVol;
+            if (volumePatched && m && m !== held) reapply(m);   // element swapped mid-hold
         } catch (e) {}
+        b.heldEl = null;
     }
 
     function bridgeStop(b, reason) {
@@ -703,7 +710,14 @@
             // far-forward seek).
             if (main && mainCt >= 0 && aheadMs > bridgeTune.alignMinMs && aheadMs < bridgeTune.alignMaxMs) {
                 b.holding = true;
+                b.heldEl = main;
                 b.heldVol = nativeVolumeOf(main);
+                // Cache the PRE-mute value before the native write below. The zero goes in
+                // through nativeVolumeSet, which bypasses the patched setter, so userVolume
+                // never sees it — and a later reapply() on an element that was never seeded
+                // would read the native 0, cache 0 as "the user's volume", and write 0 back
+                // forever. Seeding first makes that read the real value instead.
+                if (volumePatched) seedVolume(main);
                 var seekOk = false;
                 try {
                     if (volumePatched && nativeVolumeSet) nativeVolumeSet.call(main, 0);
@@ -825,6 +839,14 @@
     function reapply(el) {
         try {
             if (!volumePatched || !el || ownedMedia.has(el)) return;
+            // The alignment hold OWNS this element's volume. The bridge natively silenced it
+            // and is still sounding the same audio a beat ahead; bridgeRestoreMain is the one
+            // writer allowed to bring it back, on release. Writing here would un-mute the
+            // incoming stream mid-hold and the listener would hear the overlap twice — the
+            // exact duplication the hold exists to prevent. Every volume write in the loudness
+            // module funnels through here (reapply, and setComp's two reapply calls), so this
+            // is the only place the rule has to hold.
+            if (bridge && bridge.holding && el === bridge.heldEl) return;
             nativeVolumeSet.call(el, seedVolume(el) * effectiveGain());
         } catch (e) {}
     }
