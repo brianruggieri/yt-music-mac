@@ -473,6 +473,15 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 ?? Bundle.main.url(forResource: name, withExtension: "js"))
                 .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
         }
+        // Stream smoother MUST inject at document START (all other scripts are
+        // document-end): its fetch hook has to see the first /youtubei/v1/player call
+        // and its MediaSource/SourceBuffer prototype patches must precede YT's player
+        // boot. See .claude/plans/seamless-mode-switch.md.
+        if let smootherSrc = loadJS("stream-smoother", "visualizer") {
+            config.userContentController.addUserScript(
+                WKUserScript(source: smootherSrc, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+
         // Worklet source for visualizer.js. A worklet must load into the
         // AudioWorklet context (not the page), so we hand its source over as a
         // string and let visualizer.js build a blob: module from it. base64 +
@@ -498,6 +507,174 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                     WKUserScript(source: src, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
             }
         }
+
+        #if DEBUG
+        // Song<->Video toggle probe (debug builds, YTM_TOGGLE_PROBE=1 launches only).
+        // Self-driving: navigates to a video-backed track, toggles Video->Song->Video,
+        // logs media-element events + rAF frame gaps, and NSLogs the result via the
+        // perfProbe handler. Measures the stream-swap hiccup inside the real app so it
+        // can be compared against the plain-Chrome baseline.
+        if ProcessInfo.processInfo.environment["YTM_TOGGLE_PROBE"] == "1" {
+            config.userContentController.add(context.coordinator, name: "perfProbe")
+            // A/B seed: the smoother reads __smootherFlags at document START, so the
+            // all-off control seed must be installed before it. The probe enables the
+            // flags mid-run (treatment phase) — bridge checks its flag per swap and
+            // loudness lazy-installs on the first enabled swap, so runtime enable works.
+            // Mutate-in-place when the smoother already created its flags object (user
+            // scripts share addition order, and the smoother captures its own reference
+            // — replacing the global would leave the smoother reading stale defaults).
+            config.userContentController.addUserScript(WKUserScript(
+                source: "(function(){var f=window.__smootherFlags;if(f){f.bridge=false;f.loudness=false;}else{window.__smootherFlags={bridge:false,loudness:false};}})();",
+                injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            config.userContentController.addUserScript(WKUserScript(source: #"""
+            (function () {
+                if (window.__probeInstalled) return; window.__probeInstalled = true;
+                var log = [];
+                function L(tag, extra) { var e = Object.assign({ t: +performance.now().toFixed(1), tag: tag }, extra || {}); log.push(e); }
+                var EV = ['loadstart','loadedmetadata','canplay','seeking','seeked','waiting','stalled','playing','pause','play','emptied','durationchange'];
+                function wire(v) { if (v.__pw) return; v.__pw = true; EV.forEach(function (ev) { v.addEventListener(ev, function () { L(ev, { ct: +v.currentTime.toFixed(3), rs: v.readyState }); }); }); }
+                document.querySelectorAll('video').forEach(wire);
+                new MutationObserver(function () { document.querySelectorAll('video').forEach(wire); }).observe(document.documentElement, { childList: true, subtree: true });
+                var last = performance.now();
+                (function loop() { var n = performance.now(); if (n - last > 100) L('FRAME_GAP', { gap: +(n - last).toFixed(0) }); last = n; requestAnimationFrame(loop); })();
+                document.addEventListener('ytm-swapfade', function (e) { L('FADE_' + (e.detail && e.detail.phase), {}); });
+                document.addEventListener('ytm-smoother', function (e) { L('SMOOTHER', e.detail); });
+                // RMS trace from the native AudioTap feed (interleaved stereo Float32,
+                // base64, ~60Hz batches). We own __milkFeed: the visualizer UI is never
+                // activated in a probe run, only the native capture (modeOn).
+                var rms = [];
+                var pcm = [];      // {t, d: Float32Array} mono 6kHz batches, ~12s retained
+                var pcmSamples = 0;
+                window.__milkFeed = function (b64) {
+                    try {
+                        var bin = atob(b64), u8 = new Uint8Array(bin.length);
+                        for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+                        var f = new Float32Array(u8.buffer), s = 0;
+                        for (var j = 0; j < f.length; j++) s += f[j] * f[j];
+                        var now = performance.now();
+                        rms.push({ t: Math.round(now), v: Math.sqrt(s / f.length) });
+                        if (rms.length > 12000) rms.shift();
+                        // Mono 6kHz downmix (stereo interleaved 48k -> stride 8 frames)
+                        var frames = f.length >> 1, n = Math.floor(frames / 8);
+                        var d = new Float32Array(n);
+                        for (var k = 0; k < n; k++) { var idx = k * 16; d[k] = (f[idx] + f[idx + 1]) * 0.5; }
+                        pcm.push({ t: now, d: d }); pcmSamples += n;
+                        while (pcmSamples > 6000 * 12) { pcmSamples -= pcm[0].d.length; pcm.shift(); }
+                    } catch (e) {}
+                };
+                // Flatten PCM in [t0,t1] (wall-clock ms) into one array at ~6kHz.
+                function pcmWindow(t0, t1) {
+                    var out = [];
+                    for (var i = 0; i < pcm.length; i++) {
+                        var b = pcm[i], durMs = b.d.length / 6;
+                        if (b.t + durMs < t0 || b.t > t1) continue;
+                        for (var k = 0; k < b.d.length; k++) {
+                            var st = b.t + k / 6;
+                            if (st >= t0 && st <= t1) out.push(b.d[k]);
+                        }
+                    }
+                    return out;
+                }
+                // Does the tail of what played BEFORE the audible transition repeat
+                // after it? Max normalized cross-correlation of A (last 400ms pre) vs
+                // B (900ms post) over lags 0..700ms. Duplication = high corr at a lag.
+                function dupMetric(tRelease) {
+                    var A = pcmWindow(tRelease - 450, tRelease - 50);
+                    var B = pcmWindow(tRelease, tRelease + 900);
+                    if (A.length < 1200 || B.length < 3000) return { corr: -1, lagMs: -1, note: 'insufficient-pcm' };
+                    var aN = 0; for (var i = 0; i < A.length; i++) aN += A[i] * A[i];
+                    if (aN < 1e-6) return { corr: -1, lagMs: -1, note: 'silent-tail' };
+                    var best = 0, bestLag = 0;
+                    for (var L = 0; L + A.length <= B.length; L += 2) {
+                        var dot = 0, bN = 0;
+                        for (var j = 0; j < A.length; j++) { dot += A[j] * B[j + L]; bN += B[j + L] * B[j + L]; }
+                        if (bN < 1e-6) continue;
+                        var r = dot / Math.sqrt(aN * bN);
+                        if (r > best) { best = r; bestLag = L; }
+                    }
+                    return { corr: +best.toFixed(3), lagMs: Math.round(bestLag / 6) };
+                }
+                function post(m) { try { webkit.messageHandlers.perfProbe.postMessage(m); } catch (e) {} }
+                function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+                function v() { return document.querySelector('video'); }
+                // Longest continuous sub-threshold run inside [t0,t1] (ms). Threshold is
+                // reported raw alongside so the analysis can recalibrate offline.
+                var TH = 0.003;
+                function silentMs(t0, t1) {
+                    var start = null, prev = null, longest = 0;
+                    rms.forEach(function (p) {
+                        if (p.t < t0 || p.t > t1) return;
+                        if (p.v < TH) { if (start === null) start = p.t; prev = p.t; }
+                        else if (start !== null) { longest = Math.max(longest, prev - start); start = null; }
+                    });
+                    if (start !== null) longest = Math.max(longest, prev - start);
+                    return longest;
+                }
+                function btn(c) { return document.querySelector('.av-toggle button.' + c); }
+                async function toggle(cls, label) {
+                    var t0 = performance.now();
+                    L('CLICK ' + label, { ct: +v().currentTime.toFixed(3) });
+                    btn(cls).click();
+                    await sleep(6000);
+                    L('GAP ' + label, { silentMs: silentMs(t0, t0 + 3500), rmsPoints: rms.length });
+                    // The audible transition is align-release when the hold ran, else handover.
+                    var rel = null, hand = null;
+                    for (var i = log.length - 1; i >= 0; i--) {
+                        var e = log[i];
+                        if (e.tag !== 'SMOOTHER' || e.t < t0) continue;
+                        if (!rel && e.module === 'bridge' && e.event === 'align-release') rel = e;
+                        if (!hand && e.module === 'swap' && e.event === 'handover') hand = e;
+                    }
+                    var tRel = rel ? rel.t : (hand ? hand.t : 0);
+                    if (tRel) L('DUP ' + label, dupMetric(tRel));
+                }
+                // Position-matched pairs: same seek target + settle before control and
+                // treatment so musical dynamics don't skew the RMS comparison.
+                async function seekSettle(sec) { try { v().currentTime = sec; } catch (e) {} await sleep(2500); }
+                async function run() {
+                    post('probe installed on ' + location.pathname);
+                    await sleep(8000);
+                    if (!/watch/.test(location.pathname)) { post('navigating to watch page'); location.href = 'https://music.youtube.com/watch?v=i3Jv9fNPjgk'; return; }
+                    for (var i = 0; i < 40 && !(v() && v().readyState >= 3 && !v().paused && v().currentTime > 2); i++) {
+                        if (i === 5 && v() && v().paused) { var b = document.querySelector('ytmusic-player-bar #play-pause-button'); if (b) b.click(); }
+                        await sleep(500);
+                    }
+                    if (!(v() && v().readyState >= 3 && !v().paused)) { post('FAIL: playback never started; log=' + JSON.stringify(log)); return; }
+                    if (!btn('song-button') || !btn('video-button')) { post('FAIL: toggle not found'); return; }
+                    // The native tap occasionally misses its first start (process-tap
+                    // race right after launch) — retry until PCM actually flows.
+                    for (var ta = 0; ta < 6 && !rms.length; ta++) {
+                        try { webkit.messageHandlers.visualizer.postMessage({ action: 'modeOn' }); } catch (e) {}
+                        await sleep(2500);
+                        if (!rms.length) { try { webkit.messageHandlers.visualizer.postMessage({ action: 'modeOff' }); } catch (e) {} await sleep(800); }
+                    }
+                    if (!rms.length) L('RMS_UNAVAILABLE', {});
+                    log.length = 0;
+                    L('PHASE control', { flags: JSON.stringify(window.__smootherFlags) });
+                    await seekSettle(60);
+                    await toggle('song-button', 'ctrl-song');
+                    await toggle('video-button', 'ctrl-video');
+                    window.__smootherFlags.bridge = true;
+                    window.__smootherFlags.loudness = true;
+                    L('PHASE treatment', { flags: JSON.stringify(window.__smootherFlags) });
+                    await seekSettle(60);
+                    await toggle('song-button', 'treat-song');
+                    await toggle('video-button', 'treat-video');
+                    await toggle('song-button', 'treat2-song');
+                    await toggle('video-button', 'treat2-video');
+                    L('PHASE rapid', {});
+                    var t0 = performance.now();
+                    btn('song-button').click(); await sleep(150); btn('video-button').click();
+                    await sleep(6000);
+                    L('GAP rapid', { silentMs: silentMs(t0, t0 + 3000) });
+                    try { webkit.messageHandlers.visualizer.postMessage({ action: 'modeOff' }); } catch (e) {}
+                    post('RESULT ' + JSON.stringify(log));
+                }
+                run();
+            })();
+            """#, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        }
+        #endif
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -760,7 +937,14 @@ struct YouTubeMusicWebView: NSViewRepresentable {
                 Task { @MainActor in
                     self.viewModel.headerColor = color
                 }
-            } else if message.name == "visualizer",
+            }
+            #if DEBUG
+            if message.name == "perfProbe" {
+                NSLog("PERFPROBE: %@", String(describing: message.body))
+                return
+            }
+            #endif
+            if message.name == "visualizer",
                       let body = message.body as? [String: Any],
                       let action = body["action"] as? String {
                 // Only honor capture commands from a real YT Music page. This handler is
