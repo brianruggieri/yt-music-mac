@@ -697,6 +697,11 @@ enum LightThemeEngine {
             const lines = [];
             for (const name of names) {
                 const raw = found.tokens[name];
+                // The gradient branch deliberately does NOT thread keepAlpha: `color:` cannot
+                // take a gradient, so a gradient-valued token is always a surface (scrims,
+                // overlays, shimmer, slider tracks) and damping is what keeps it from
+                // inverting into a heavy black sweep. Measured on live YT: 8 gradient tokens,
+                // all surfaces; 0 elements with a gradient computed colour.
                 const light = name in OVERRIDES ? OVERRIDES[name] : (toRGB(raw) ? invert(raw, !isFilmToken(name)) : invertColorsInString(raw));
                 if (light) lines.push('  ' + name + ': ' + light + ' !important;');
             }
