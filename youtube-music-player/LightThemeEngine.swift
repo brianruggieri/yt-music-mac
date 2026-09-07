@@ -534,6 +534,14 @@ enum LightThemeEngine {
         // (--paper-*/--iron-*), which colour every tp-yt-paper-* component — dialogs,
         // context menus, dropdowns, sliders, spinners, toasts, tooltips.
         function isThemeToken(p) { return p.indexOf('--yt') === 0 || p.indexOf('--paper') === 0 || p.indexOf('--iron') === 0; }
+        // Alpha damping (see invert()) is right for a translucent FILM — a hover/press
+        // highlight painted OVER a surface — and fatal for a translucent TEXT colour: a
+        // white-alpha-0.7 label damps to rgba(0,0,0,0.084), i.e. invisible on the light
+        // page. A token's name is the only thing that says which it is, so damp only the
+        // ones that name a surface and keep alpha for everything else. Getting this
+        // backwards is what made carousel bylines and list-row durations flash blank
+        // until the runtime rescue caught up (weekly live canary, 2026-09-07).
+        function isFilmToken(p) { return /background|overlay|scrim|ripple|shadow|highlight|hover|press|touch|fill|selected|active/i.test(p); }
         function isGray(c) { return c && Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b) <= 16; }
         function lumOf(c) { return (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255; }
         function isLightGray(c) { return c && c.a !== 0 && isGray(c) && lumOf(c) >= 0.5; }
@@ -626,7 +634,7 @@ enum LightThemeEngine {
                             // --yt-sys-color-...-background: #282828 on its own host). Flip
                             // ALL of them, light OR dark — lightness inversion preserves hue,
                             // so this lights popup surfaces and their text without touching brand.
-                            if (c) decls.push(prop + ': ' + invert(v));
+                            if (c) decls.push(prop + ': ' + invert(v, !isFilmToken(prop)));
                             else if (hasGradient(v) && hasColor(v)) decls.push(prop + ': ' + invertColorsInString(v));
                         } else if (prop === 'color') {
                             // Direct text colour: only flip washed-out light-grey literals.
@@ -689,7 +697,7 @@ enum LightThemeEngine {
             const lines = [];
             for (const name of names) {
                 const raw = found.tokens[name];
-                const light = name in OVERRIDES ? OVERRIDES[name] : (toRGB(raw) ? invert(raw) : invertColorsInString(raw));
+                const light = name in OVERRIDES ? OVERRIDES[name] : (toRGB(raw) ? invert(raw, !isFilmToken(name)) : invertColorsInString(raw));
                 if (light) lines.push('  ' + name + ': ' + light + ' !important;');
             }
             for (const name in FORCE) lines.push('  ' + name + ': ' + FORCE[name] + ' !important;');
