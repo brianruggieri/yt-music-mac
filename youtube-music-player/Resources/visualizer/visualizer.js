@@ -1691,4 +1691,147 @@
         startSegObserver();
     }
 
+    // ---------------------------------------------------------------------------
+    // Song<->Video swap cross-dissolve. Switching modes makes YT tear the media
+    // element down (`emptied`), load the OTHER stream, and seek back — ~250-450ms
+    // of silence with a visible blank/resize of the media box (measured identical
+    // in plain Chrome, so the gap itself is upstream and unfixable here). Masking
+    // the visual discontinuity is what makes the audio blip stop registering.
+    //
+    // Mechanism: at toggle click, snapshot the OUTGOING visual — a canvas grab of
+    // the current video frame (drawImage taints the canvas, which only blocks pixel
+    // READBACK, not on-screen rendering), or a clone of the album-art <img> when
+    // leaving Song mode — pinned as a fixed overlay at the source's exact rect.
+    // The media box is hidden instantly beneath it, so the empty/resize happens
+    // unseen. When the new stream fires `playing`, the overlay dissolves out while
+    // the media box fades in: the two modes cross-fade directly into each other.
+    // Event-driven end (gap length varies) with a fallback timer so an error path
+    // can never leave the stage invisible. Independent of visualizer activation;
+    // the visualizer's own segment (#milkviz-seg-btn) is an overlay that never
+    // swaps streams, so it's excluded.
+    (function swapFade() {
+        var XFADE_MS = 280;
+        var snap = null;        // fixed-position snapshot overlay of the outgoing visual
+        var player = null;      // ytmusic-player, hidden during the swap
+        var fallbackTimer = 0;
+        var settleTimer = 0;
+        var onPlaying = null;
+        var vid = null;
+
+        function emit(phase) {
+            try { document.dispatchEvent(new CustomEvent('ytm-swapfade', { detail: { phase: phase } })); } catch (e) {}
+        }
+
+        function clearWatch() {
+            if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = 0; }
+            if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
+            if (onPlaying && vid) { vid.removeEventListener('playing', onPlaying, true); }
+            onPlaying = null; vid = null;
+        }
+
+        // Instantly discard any in-flight fade (re-entrant toggle click).
+        function abort() {
+            clearWatch();
+            if (snap) { snap.remove(); snap = null; }
+            if (player) { player.style.transition = ''; player.style.opacity = ''; player = null; }
+        }
+
+        // Cross-dissolve: media box 0->1 while the snapshot goes 1->0, then clean up.
+        function finish() {
+            clearWatch();
+            if (player) {
+                var p = player; player = null;
+                p.style.transition = 'opacity ' + XFADE_MS + 'ms ease';
+                p.style.opacity = '1';
+                // Clear inline styles once the transition lands so we leave no
+                // residue for YT's own styling.
+                setTimeout(function () {
+                    if (p.style.opacity === '1') { p.style.transition = ''; p.style.opacity = ''; }
+                }, XFADE_MS + 60);
+            }
+            if (snap) {
+                var s = snap; snap = null;
+                s.style.transition = 'opacity ' + XFADE_MS + 'ms ease';
+                s.style.opacity = '0';
+                setTimeout(function () { s.remove(); }, XFADE_MS + 60);
+            }
+            emit('in');
+        }
+
+        // Freeze the outgoing visual at its exact on-screen rect. Video mode ->
+        // canvas grab of the live frame; Song mode (audio-only stream, videoWidth
+        // 0) -> clone of the largest visible <img> in the player (the album art).
+        // Returns null if there's nothing snapshottable; caller degrades to a
+        // plain dip-through-background fade.
+        function makeSnapshot() {
+            var pl = document.querySelector('ytmusic-player');
+            if (!pl) return null;
+            var node = null, srcEl = null;
+            var v = pl.querySelector('video');
+            if (v && v.videoWidth > 0 && v.getBoundingClientRect().width > 0) {
+                var c = document.createElement('canvas');
+                c.width = v.videoWidth; c.height = v.videoHeight;
+                try { c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); } catch (e) { return null; }
+                node = c; srcEl = v;
+            } else {
+                var imgs = Array.prototype.filter.call(pl.querySelectorAll('img'), function (i) {
+                    var r = i.getBoundingClientRect();
+                    return r.width > 40 && r.height > 40;
+                }).sort(function (a, b) {
+                    var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+                    return rb.width * rb.height - ra.width * ra.height;
+                });
+                if (!imgs.length) return null;
+                srcEl = imgs[0];
+                node = srcEl.cloneNode(false);
+            }
+            var r = srcEl.getBoundingClientRect();
+            node.style.cssText = 'position:fixed;left:' + r.left + 'px;top:' + r.top + 'px;' +
+                'width:' + r.width + 'px;height:' + r.height + 'px;' +
+                'z-index:9998;pointer-events:none;object-fit:contain;margin:0;border-radius:8px;';
+            document.body.appendChild(node);
+            return node;
+        }
+
+        document.addEventListener('click', function (e) {
+            var btn = e.target && e.target.closest &&
+                e.target.closest('.av-toggle button.song-button, .av-toggle button.video-button:not(#milkviz-seg-btn)');
+            if (!btn) return;
+            if (btn.getAttribute('aria-pressed') === 'true') return;   // no-op click, no swap
+            var v = document.querySelector('video');
+            if (!v || v.paused) return;                                // nothing live to mask
+            abort();
+            player = document.querySelector('ytmusic-player');
+            if (!player) return;
+            snap = makeSnapshot();
+            if (snap) {
+                // Snapshot covers the box — hide the live element instantly so the
+                // teardown/resize happens invisibly beneath the frozen frame.
+                player.style.transition = 'none';
+                player.style.opacity = '0';
+            } else {
+                // Degraded path: no snapshot source; dip through the page background.
+                player.style.transition = 'opacity 120ms ease-out';
+                player.style.opacity = '0';
+            }
+            emit('out');
+            // Listen at the document (capture) rather than on the outgoing element:
+            // media events don't bubble but do capture, and if YT replaces the <video>
+            // during the swap an element-bound listener would miss the new stream's
+            // `playing` and strand the dissolve until the fallback timer.
+            vid = document;
+            onPlaying = function (ev) {
+                if (!ev.target || ev.target.tagName !== 'VIDEO') return;
+                document.removeEventListener('playing', onPlaying, true);
+                // Small settle so the first decoded frame is actually on screen
+                // before the dissolve reveals it (avoids a one-frame stale flash).
+                settleTimer = setTimeout(finish, 60);
+            };
+            document.addEventListener('playing', onPlaying, true);
+            // The swap normally resolves in <500ms; if `playing` never fires
+            // (error path, ad break), don't leave the stage invisible.
+            fallbackTimer = setTimeout(finish, 1600);
+        }, true);
+    })();
+
 })();
