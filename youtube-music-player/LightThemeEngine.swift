@@ -338,6 +338,12 @@ enum LightThemeEngine {
             // subtle fill + inset hairline ring + rounded corners, matching the nav/tonal buttons.
             ['ytmusic-card-shelf-renderer',
                 'background-color: rgba(0,0,0,0.035); border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10)'],
+            // YT (Oct 2026) added an immersive backdrop to that card: #background holds a
+            // full-bleed copy of the hero art, which under our light gradient reads as a muddy
+            // two-tone wash and paints over the fill + hairline ring above. Dark keeps it (YT's
+            // design); light drops it so the card stays the flat defined surface.
+            ['ytmusic-card-shelf-renderer .immersive-background',
+                'display: none'],
             // …but that card fill has padding:0, so a card-shelf whose header text sits at the
             // card's edge (the self-channel "Personal mix" auto-mix card: a "PRIVATE" badge +
             // bold heading in the top-left, no hero thumbnail to inset it) gets jammed against
